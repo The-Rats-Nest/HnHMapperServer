@@ -132,7 +132,7 @@
             // If user has exactly one tenant, auto-select it
             if (_tenants.Count == 1)
             {
-                await SelectTenant(_tenants[0]);
+                SelectTenant(_tenants[0]);
             }
         }
         catch (Exception ex)
@@ -145,28 +145,13 @@
         }
     }
 
-    private async Task SelectTenant(TenantDto tenant)
+    private void SelectTenant(TenantDto tenant)
     {
-        try
-        {
-            var success = await TenantService.SelectTenantAsync(tenant.Id);
-            if (success)
-            {
-                TenantContext.SetCurrentTenant(tenant);
-                Snackbar.Add($"Selected {tenant.Name}", Severity.Success);
-
-                // Redirect to dashboard
-                Navigation.NavigateTo("/", forceLoad: true);
-            }
-            else
-            {
-                Snackbar.Add("Failed to select tenant", Severity.Error);
-            }
-        }
-        catch (Exception ex)
-        {
-            Snackbar.Add($"Error selecting tenant: {ex.Message}", Severity.Error);
-        }
+        // Navigate to the server-side endpoint that re-signs-in with the new tenant.
+        // This MUST be a full server round-trip (forceLoad) because switching tenants
+        // requires writing a new authentication cookie via SignInAsync, which only
+        // works on a real HTTP response — not inside a Blazor SignalR circuit.
+        Navigation.NavigateTo($"/api/select-tenant/{tenant.Id}", forceLoad: true);
     }
 
     private string GetTenantIcon(string tenantId)
