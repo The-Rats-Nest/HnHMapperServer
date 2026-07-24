@@ -107,6 +107,12 @@ public static class SuperadminEndpoints
         // DELETE /api/superadmin/users/{userId}/unassigned - Hard-delete an unassigned user
         group.MapDelete("/users/{userId}/unassigned", DeleteUnassignedUser);
 
+        // GET /api/superadmin/users/with-tenants - List all users with their tenant memberships
+        group.MapGet("/users/with-tenants", GetAllUsersWithTenants);
+
+        // DELETE /api/superadmin/users/{userId}/tenants/{tenantId} - Remove user from a specific tenant
+        group.MapDelete("/users/{userId}/tenants/{tenantId}", RemoveUserFromTenantDirect);
+
         // === Map & Marker Monitoring ===
 
         // GET /api/superadmin/maps - List all maps across all tenants
@@ -1969,13 +1975,13 @@ public static class SuperadminEndpoints
             if (tenant == null)
                 return Results.NotFound(new { error = "Tenant not found" });
 
-            // Check if user is already in a tenant
+            // Check if user is already in this specific tenant
             var existingAssignment = await db.TenantUsers
                 .IgnoreQueryFilters()
-                .AnyAsync(tu => tu.UserId == userId);
+                .AnyAsync(tu => tu.UserId == userId && tu.TenantId == dto.TenantId);
 
             if (existingAssignment)
-                return Results.BadRequest(new { error = "User is already assigned to a tenant" });
+                return Results.BadRequest(new { error = "User is already assigned to this tenant" });
 
             // Validate role
             if (dto.Role != TenantRole.TenantAdmin.ToClaimValue() && dto.Role != TenantRole.TenantUser.ToClaimValue())
@@ -2988,6 +2994,132 @@ public static class SuperadminEndpoints
             return Results.Problem("Failed to start generation");
         }
     }
+
+    // ===========================
+    // User Management Endpoints
+    // ===========================
+
+    /// <summary>
+    /// GET /api/superadmin/users/with-tenants
+    /// Lists all users with their tenant memberships
+    /// </summary>
+    private static async Task<IResult> GetAllUsersWithTenants(
+        ApplicationDbContext db,
+        UserManager<ApplicationUser> userManager,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            var users = await userManager.Users.ToListAsync();
+
+            var tenantUsers = await db.TenantUsers
+                .IgnoreQueryFilters()
+                .Include(tu => tu.Permissions)
+                .ToListAsync();
+
+            var tenants = await db.Tenants
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .ToDictionaryAsync(t => t.Id, t => t.Name);
+
+            var superAdminUserIds = new HashSet<string>();
+            foreach (var user in users)
+            {
+                if (await userManager.IsInRoleAsync(user, "SuperAdmin"))
+                    superAdminUserIds.Add(user.Id);
+            }
+
+            var result = users.Select(u => new UserWithTenantsDto
+            {
+                UserId = u.Id,
+                Username = u.UserName ?? string.Empty,
+                Email = u.Email,
+                DiscordName = u.DiscordName,
+                CreatedAt = u.CreatedAt,
+                IsSuperAdmin = superAdminUserIds.Contains(u.Id),
+                Tenants = tenantUsers
+                    .Where(tu => tu.UserId == u.Id)
+                    .Select(tu => new UserTenantMembershipDto
+                    {
+                        TenantId = tu.TenantId,
+                        TenantName = tenants.GetValueOrDefault(tu.TenantId, "Unknown"),
+                        Role = tu.Role.ToString(),
+                        Permissions = tu.Permissions.Select(p => p.Permission.ToString()).ToList(),
+                        JoinedAt = tu.JoinedAt,
+                        PendingApproval = tu.PendingApproval
+                    }).ToList()
+            }).OrderBy(u => u.Username).ToList();
+
+            logger.LogInformation("SuperAdmin: Loaded {Count} users with tenant memberships", result.Count);
+            return Results.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error loading users with tenants");
+            return Results.Problem("Failed to load users");
+        }
+    }
+
+    /// <summary>
+    /// DELETE /api/superadmin/users/{userId}/tenants/{tenantId}
+    /// Removes a user from a specific tenant
+    /// </summary>
+    private static async Task<IResult> RemoveUserFromTenantDirect(
+        string userId,
+        string tenantId,
+        ApplicationDbContext db,
+        UserManager<ApplicationUser> userManager,
+        IAuditService auditService,
+        HttpContext context,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            var adminUsername = context.User.Identity?.Name ?? "unknown";
+
+            var user = await userManager.FindByIdAsync(userId);
+            if (user == null)
+                return Results.NotFound(new { error = "User not found" });
+
+            var tenantUser = await db.TenantUsers
+                .IgnoreQueryFilters()
+                .Include(tu => tu.Permissions)
+                .FirstOrDefaultAsync(tu => tu.UserId == userId && tu.TenantId == tenantId);
+
+            if (tenantUser == null)
+                return Results.NotFound(new { error = "User is not a member of this tenant" });
+
+            // Remove permissions first
+            if (tenantUser.Permissions.Any())
+                db.TenantPermissions.RemoveRange(tenantUser.Permissions);
+
+            db.TenantUsers.Remove(tenantUser);
+            await db.SaveChangesAsync();
+
+            // Log audit
+            db.AuditLogs.Add(new HnHMapperServer.Core.Models.AuditLogEntity
+            {
+                Timestamp = DateTime.UtcNow.ToString("O"),
+                UserId = adminUsername,
+                TenantId = tenantId,
+                Action = "SuperAdminRemovedUserFromTenant",
+                EntityType = "TenantUser",
+                EntityId = userId,
+                NewValue = $"User {user.UserName} removed from tenant {tenantId}"
+            });
+            await db.SaveChangesAsync();
+
+            logger.LogInformation("SuperAdmin {Admin} removed user {UserId} ({Username}) from tenant {TenantId}",
+                adminUsername, userId, user.UserName, tenantId);
+
+            return Results.Ok(new { message = "User removed from tenant successfully" });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error removing user {UserId} from tenant {TenantId}", userId, tenantId);
+            return Results.Problem("Failed to remove user from tenant");
+        }
+    }
 }
 
 /// <summary>
@@ -3057,4 +3189,31 @@ public record UpdateSsoConfigDto
     public bool AutoCreateUsers { get; init; }
     public string? DefaultTenantId { get; init; }
     public string? Scopes { get; init; }
+}
+
+/// <summary>
+/// DTO for a user with all their tenant memberships
+/// </summary>
+public class UserWithTenantsDto
+{
+    public string UserId { get; set; } = string.Empty;
+    public string Username { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? DiscordName { get; set; }
+    public DateTime? CreatedAt { get; set; }
+    public bool IsSuperAdmin { get; set; }
+    public List<UserTenantMembershipDto> Tenants { get; set; } = new();
+}
+
+/// <summary>
+/// DTO for a user's membership in a single tenant
+/// </summary>
+public class UserTenantMembershipDto
+{
+    public string TenantId { get; set; } = string.Empty;
+    public string TenantName { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+    public List<string> Permissions { get; set; } = new();
+    public DateTime JoinedAt { get; set; }
+    public bool PendingApproval { get; set; }
 }
