@@ -181,20 +181,67 @@ public class FoodCatalogService : IFoodCatalogService
         return catalog ?? new List<FoodDto>();
     }
 
-    public async Task<List<string>> GetGenusListAsync(CancellationToken ct = default)
+    public async Task<List<GenusInfoDto>> GetGenusListAsync(CancellationToken ct = default)
     {
         var tenantId = _tenantContext.GetCurrentTenantId();
         if (string.IsNullOrEmpty(tenantId))
         {
-            return new List<string>();
+            return new List<GenusInfoDto>();
         }
 
-        return await _dbContext.Foods
+        var genera = await _dbContext.Foods
             .AsNoTracking()
             .Select(f => f.Genus)
             .Distinct()
             .OrderBy(g => g)
             .ToListAsync(ct);
+
+        var aliases = await _dbContext.GenusAliases
+            .AsNoTracking()
+            .ToDictionaryAsync(a => a.Genus, a => a.DisplayName, ct);
+
+        return genera.Select(g => new GenusInfoDto
+        {
+            Genus = g,
+            DisplayName = aliases.GetValueOrDefault(g)
+        }).ToList();
+    }
+
+    public async Task SetGenusAliasAsync(string genus, string? displayName, CancellationToken ct = default)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+            return;
+
+        var existing = await _dbContext.GenusAliases
+            .FirstOrDefaultAsync(a => a.Genus == genus, ct);
+
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            // Remove alias
+            if (existing != null)
+            {
+                _dbContext.GenusAliases.Remove(existing);
+                await _dbContext.SaveChangesAsync(ct);
+            }
+        }
+        else
+        {
+            if (existing != null)
+            {
+                existing.DisplayName = displayName.Trim();
+            }
+            else
+            {
+                _dbContext.GenusAliases.Add(new GenusAliasEntity
+                {
+                    TenantId = tenantId,
+                    Genus = genus,
+                    DisplayName = displayName.Trim()
+                });
+            }
+            await _dbContext.SaveChangesAsync(ct);
+        }
     }
 
     public async Task<CookbookStatusDto> GetStatusAsync(string tenantId, CancellationToken ct = default)

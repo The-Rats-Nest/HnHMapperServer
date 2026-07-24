@@ -270,6 +270,61 @@
                 </MudText>
             </MudPaper>
         }
+            @* World (Genus) Aliases *@
+            <MudPaper Elevation="2" Class="pa-4">
+                <MudText Typo="Typo.h6" Class="mb-3">World Aliases</MudText>
+                <MudText Typo="Typo.body2" Class="mb-3">
+                    Assign friendly display names to game worlds (genera) in the Cookbook.
+                </MudText>
+                @if (_genusAliasesLoading)
+                {
+                    <MudProgressLinear Indeterminate="true" Size="Size.Small" />
+                }
+                else if (_genusAliases.Count == 0)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true">
+                        No worlds found in the cookbook yet. Upload food data to see worlds here.
+                    </MudAlert>
+                }
+                else
+                {
+                    <MudSimpleTable Dense="true" Hover="true" Bordered="true" Class="mb-3">
+                        <thead>
+                            <tr>
+                                <th>World (Genus)</th>
+                                <th>Display Name</th>
+                                <th style="width: 120px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var alias in _genusAliases)
+                            {
+                                <tr>
+                                    <td>@(string.IsNullOrEmpty(alias.Genus) ? "(unknown)" : alias.Genus)</td>
+                                    <td>
+                                        <MudTextField T="string"
+                                                     @bind-Value="alias.DisplayName"
+                                                     Placeholder="Enter friendly name..."
+                                                     Variant="Variant.Text"
+                                                     Margin="Margin.Dense"
+                                                     Immediate="true" />
+                                    </td>
+                                    <td>
+                                        <MudButton Size="Size.Small"
+                                                   Variant="Variant.Filled"
+                                                   Color="Color.Primary"
+                                                   OnClick="@(() => SaveGenusAlias(alias))"
+                                                   Disabled="@_isSavingGenusAlias">
+                                            Save
+                                        </MudButton>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </MudSimpleTable>
+                }
+            </MudPaper>
+        }
         else
         {
             <MudAlert Severity="Severity.Warning">
@@ -299,9 +354,20 @@
     private bool _allowNewMaps = true;
     private bool _isSavingMapSettings = false;
 
+    // Genus alias fields
+    private List<GenusAliasEditModel> _genusAliases = new();
+    private bool _genusAliasesLoading = true;
+    private bool _isSavingGenusAlias = false;
+
+    private class GenusAliasEditModel
+    {
+        public string Genus { get; set; } = string.Empty;
+        public string? DisplayName { get; set; }
+    }
+
     protected override async Task OnInitializedAsync()
     {
-        await Task.WhenAll(LoadSettings(), LoadMaps());
+        await Task.WhenAll(LoadSettings(), LoadMaps(), LoadGenusAliases());
     }
 
     private async Task LoadSettings()
@@ -628,6 +694,59 @@
         finally
         {
             _isTestingDiscord = false;
+        }
+    }
+
+    private async Task LoadGenusAliases()
+    {
+        _genusAliasesLoading = true;
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            var genera = await client.GetFromJsonAsync<List<GenusInfoDto>>("/api/v1/cookbook/genera") ?? new List<GenusInfoDto>();
+            _genusAliases = genera.Select(g => new GenusAliasEditModel
+            {
+                Genus = g.Genus,
+                DisplayName = g.DisplayName
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading genus aliases");
+        }
+        finally
+        {
+            _genusAliasesLoading = false;
+        }
+    }
+
+    private async Task SaveGenusAlias(GenusAliasEditModel alias)
+    {
+        if (_tenantSettings == null) return;
+        _isSavingGenusAlias = true;
+        try
+        {
+            var tenantId = TenantContext.CurrentTenant?.Id ?? _tenantSettings.Id;
+            var client = HttpClientFactory.CreateClient("API");
+            var dto = new SetGenusAliasDto { Genus = alias.Genus, DisplayName = alias.DisplayName };
+            var response = await client.PutAsJsonAsync($"/api/tenants/{tenantId}/cookbook/genus-alias", dto);
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add($"Alias for '{alias.Genus}' saved.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Failed to save alias.", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving genus alias");
+            Snackbar.Add("Failed to save alias.", Severity.Error);
+        }
+        finally
+        {
+            _isSavingGenusAlias = false;
         }
     }
 

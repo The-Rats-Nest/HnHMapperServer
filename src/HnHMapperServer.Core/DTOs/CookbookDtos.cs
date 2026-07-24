@@ -298,6 +298,28 @@ public class FoodUploadResultDto
 }
 
 /// <summary>
+/// A genus value with its optional display alias.
+/// </summary>
+public class GenusInfoDto
+{
+    public string Genus { get; set; } = string.Empty;
+
+    /// <summary>Admin-assigned friendly name, or null when no alias is set.</summary>
+    public string? DisplayName { get; set; }
+}
+
+/// <summary>
+/// Request to set or update a genus alias.
+/// </summary>
+public class SetGenusAliasDto
+{
+    public string Genus { get; set; } = string.Empty;
+
+    /// <summary>Friendly display name. Empty/null to remove the alias.</summary>
+    public string? DisplayName { get; set; }
+}
+
+/// <summary>
 /// Outcome of a cookbook import (wipe-and-replace).
 /// </summary>
 public class CookbookImportResultDto

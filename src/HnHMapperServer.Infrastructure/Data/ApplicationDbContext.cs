@@ -90,6 +90,7 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Id
     public DbSet<FoodVariantEntity> FoodVariants => Set<FoodVariantEntity>();
     public DbSet<FoodPanelEntity> FoodPanels => Set<FoodPanelEntity>();
     public DbSet<FoodPanelItemEntity> FoodPanelItems => Set<FoodPanelItemEntity>();
+    public DbSet<GenusAliasEntity> GenusAliases => Set<GenusAliasEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -1048,6 +1049,20 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Id
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // Genus aliases (tenant-scoped): friendly display names for genus values
+        modelBuilder.Entity<GenusAliasEntity>(entity =>
+        {
+            entity.HasKey(e => new { e.TenantId, e.Genus });
+            entity.Property(e => e.TenantId).IsRequired();
+            entity.Property(e => e.Genus).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(200);
+
+            entity.HasOne<TenantEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         // Global query filters for automatic tenant isolation
         // These filters automatically add "WHERE TenantId = {currentTenantId}" to all queries
         // GetCurrentTenantId() is evaluated at query time (not model creation time)
@@ -1089,6 +1104,9 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Id
 
         modelBuilder.Entity<ConfigEntity>()
             .HasQueryFilter(c => c.TenantId == GetCurrentTenantId());
+
+        modelBuilder.Entity<GenusAliasEntity>()
+            .HasQueryFilter(a => a.TenantId == GetCurrentTenantId());
 
         modelBuilder.Entity<NotificationEntity>()
             .HasQueryFilter(n => n.TenantId == GetCurrentTenantId());
@@ -2270,6 +2288,17 @@ public sealed class FoodIngredient
 /// panel flagged IsFavorites (pinned first in the UI, quick-toggled via the star).
 /// Shared panels are visible read-only to everyone in the tenant.
 /// </summary>
+/// <summary>
+/// Tenant-scoped friendly display name for a genus value.
+/// Composite key: (TenantId, Genus).
+/// </summary>
+public sealed class GenusAliasEntity
+{
+    public string TenantId { get; set; } = string.Empty;
+    public string Genus { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+}
+
 public sealed class FoodPanelEntity
 {
     public int Id { get; set; }

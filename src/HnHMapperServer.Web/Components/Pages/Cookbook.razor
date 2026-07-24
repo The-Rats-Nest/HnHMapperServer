@@ -40,7 +40,7 @@
                                   Variant="Variant.Outlined"
                                   Margin="Margin.Dense" />
                 </MudItem>
-                @if (_genera.Count > 1)
+                @if (_generaInfo.Count > 1)
                 {
                     <MudItem xs="12" sm="6" md="2">
                         <MudSelect T="string"
@@ -50,15 +50,14 @@
                                    Variant="Variant.Outlined"
                                    Margin="Margin.Dense"
                                    Dense="true">
-                            <MudSelectItem T="string" Value="@((string?)null)">All worlds</MudSelectItem>
-                            @foreach (var g in _genera)
+                            @foreach (var g in _generaInfo)
                             {
-                                <MudSelectItem T="string" Value="@g">@(string.IsNullOrEmpty(g) ? "(unknown)" : g)</MudSelectItem>
+                                <MudSelectItem T="string" Value="@g.Genus">@GenusDisplayName(g)</MudSelectItem>
                             }
                         </MudSelect>
                     </MudItem>
                 }
-                <MudItem xs="12" sm="6" md="@(_genera.Count > 1 ? 2 : 4)">
+                <MudItem xs="12" sm="6" md="@(_generaInfo.Count > 1 ? 2 : 4)">
                     <MudNumericField T="int"
                                      @bind-Value="_quality"
                                      Immediate="true"
@@ -986,14 +985,15 @@
     private bool _loadFailed;
     private string _search = string.Empty;
     private int _quality = 10;
-    private List<string> _genera = new();
+    private List<GenusInfoDto> _generaInfo = new();
     private string? _selectedGenus;
 
     private double QualityMultiplier => Math.Sqrt(Math.Max(1, _quality) / 10.0);
 
     protected override async Task OnInitializedAsync()
     {
-        await Task.WhenAll(LoadGeneraAsync(), LoadCatalogAsync(), LoadPanelsAsync());
+        await LoadGeneraAsync();
+        await Task.WhenAll(LoadCatalogAsync(), LoadPanelsAsync());
     }
 
     private async Task LoadCatalogAsync()
@@ -1089,12 +1089,22 @@
         try
         {
             var client = HttpClientFactory.CreateClient("API");
-            _genera = await client.GetFromJsonAsync<List<string>>("/api/v1/cookbook/genera") ?? new List<string>();
+            _generaInfo = await client.GetFromJsonAsync<List<GenusInfoDto>>("/api/v1/cookbook/genera") ?? new List<GenusInfoDto>();
+            if (_selectedGenus == null && _generaInfo.Count > 0)
+            {
+                _selectedGenus = _generaInfo[0].Genus;
+            }
         }
         catch (Exception)
         {
             // Genus selector is progressive enhancement — the page works without it.
         }
+    }
+
+    private string GenusDisplayName(GenusInfoDto g)
+    {
+        if (!string.IsNullOrEmpty(g.DisplayName)) return g.DisplayName;
+        return string.IsNullOrEmpty(g.Genus) ? "(unknown)" : g.Genus;
     }
 
     private async Task OnGenusChanged(string? value)

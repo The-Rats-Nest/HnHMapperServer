@@ -44,6 +44,7 @@ public static class CookbookEndpoints
         admin.MapGet("/status", GetStatus);
         admin.MapPost("/import", ImportCookbook);
         admin.MapDelete("", ClearCookbook);
+        admin.MapPut("/genus-alias", SetGenusAlias);
     }
 
     /// <summary>
@@ -126,6 +127,32 @@ public static class CookbookEndpoints
         {
             logger.LogError(ex, "Error loading cookbook genera");
             return Results.Problem("Failed to load genera");
+        }
+    }
+
+    /// <summary>
+    /// PUT /api/tenants/{tenantId}/cookbook/genus-alias
+    /// Sets or removes a genus display alias.
+    /// </summary>
+    private static async Task<IResult> SetGenusAlias(
+        string tenantId,
+        SetGenusAliasDto dto,
+        ClaimsPrincipal user,
+        IFoodCatalogService foodCatalogService,
+        ILogger<Program> logger)
+    {
+        if (!CanManageTenant(user, tenantId))
+            return Results.Forbid();
+
+        try
+        {
+            await foodCatalogService.SetGenusAliasAsync(dto.Genus, dto.DisplayName);
+            return Results.Ok();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error setting genus alias for tenant {TenantId}", tenantId);
+            return Results.Problem("Failed to set genus alias");
         }
     }
 

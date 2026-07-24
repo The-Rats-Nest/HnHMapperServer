@@ -16,9 +16,15 @@ public interface IFoodCatalogService
     Task<List<FoodDto>> GetCatalogAsync(string? genus = null, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the distinct genus values present in the current tenant's food catalog.
+    /// Returns the distinct genus values present in the current tenant's food catalog,
+    /// together with any admin-assigned display aliases.
     /// </summary>
-    Task<List<string>> GetGenusListAsync(CancellationToken ct = default);
+    Task<List<GenusInfoDto>> GetGenusListAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets or removes a genus display alias for the current tenant.
+    /// </summary>
+    Task SetGenusAliasAsync(string genus, string? displayName, CancellationToken ct = default);
 
     /// <summary>
     /// Returns food/variant counts and last import/upload time for the given tenant.
