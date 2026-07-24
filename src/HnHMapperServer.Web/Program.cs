@@ -278,6 +278,129 @@ builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
         };
     });
 
+// === SSO / OpenID Connect Configuration ===
+// Read SSO settings from the database at startup and conditionally register OIDC scheme.
+// Changes to SSO config via the SuperAdmin UI require an application restart.
+{
+    // Build a temporary DbContext to read SSO config from the Config table
+    var gridStorageForSso = builder.Configuration["GridStorage"];
+    if (string.IsNullOrWhiteSpace(gridStorageForSso))
+        gridStorageForSso = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "map"));
+    else if (!Path.IsPathRooted(gridStorageForSso))
+        gridStorageForSso = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", gridStorageForSso));
+    var ssoDbPath = Path.Combine(gridStorageForSso, "grids.db");
+
+    string? ssoEnabled = null, ssoAuthority = null, ssoClientId = null, ssoClientSecret = null;
+    string? ssoDisplayName = null, ssoScopes = null, ssoAutoCreate = null, ssoDefaultTenant = null;
+
+    if (File.Exists(ssoDbPath))
+    {
+        try
+        {
+            using var ssoConn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={ssoDbPath};Mode=ReadOnly");
+            ssoConn.Open();
+            string? ReadSsoKey(string key)
+            {
+                using var cmd = ssoConn.CreateCommand();
+                cmd.CommandText = "SELECT Value FROM Config WHERE Key = @key AND TenantId = '__global__' LIMIT 1";
+                cmd.Parameters.AddWithValue("@key", key);
+                return cmd.ExecuteScalar() as string;
+            }
+            ssoEnabled = ReadSsoKey("sso:enabled");
+            ssoAuthority = ReadSsoKey("sso:authority");
+            ssoClientId = ReadSsoKey("sso:clientId");
+            ssoClientSecret = ReadSsoKey("sso:clientSecret");
+            ssoDisplayName = ReadSsoKey("sso:displayName");
+            ssoScopes = ReadSsoKey("sso:scopes");
+            ssoAutoCreate = ReadSsoKey("sso:autoCreateUsers");
+            ssoDefaultTenant = ReadSsoKey("sso:defaultTenantId");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SSO] Warning: Could not read SSO config from database: {ex.Message}");
+        }
+    }
+
+    var ssoIsEnabled = ssoEnabled == "true"
+        && !string.IsNullOrWhiteSpace(ssoAuthority)
+        && !string.IsNullOrWhiteSpace(ssoClientId)
+        && !string.IsNullOrWhiteSpace(ssoClientSecret);
+
+    // Store SSO state in configuration so endpoints and Login.razor can check it
+    builder.Configuration["Sso:Enabled"] = ssoIsEnabled.ToString().ToLower();
+    builder.Configuration["Sso:DisplayName"] = ssoDisplayName ?? "SSO Login";
+    builder.Configuration["Sso:AutoCreateUsers"] = ssoAutoCreate ?? "false";
+    builder.Configuration["Sso:DefaultTenantId"] = ssoDefaultTenant ?? string.Empty;
+
+    if (ssoIsEnabled)
+    {
+        builder.Services.AddAuthentication()
+            .AddOpenIdConnect("oidc", ssoDisplayName ?? "SSO Login", options =>
+            {
+                options.Authority = ssoAuthority;
+                options.ClientId = ssoClientId;
+                options.ClientSecret = ssoClientSecret;
+                options.ResponseType = "code";
+                options.SaveTokens = false;
+                options.GetClaimsFromUserInfoEndpoint = true;
+                options.CallbackPath = "/api/sso/oidc-callback"; // Internal OIDC middleware callback
+
+                // Configure scopes
+                options.Scope.Clear();
+                foreach (var scope in (ssoScopes ?? "openid profile email").Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    options.Scope.Add(scope);
+                }
+
+                // Map standard claims
+                options.TokenValidationParameters.NameClaimType = "preferred_username";
+
+                // Don't auto-authenticate with OIDC — only when explicitly challenged
+                options.Events = new Microsoft.AspNetCore.Authentication.OpenIdConnect.OpenIdConnectEvents
+                {
+                    OnRedirectToIdentityProvider = context =>
+                    {
+                        // Only redirect if this was an explicit SSO login request
+                        if (context.Properties.Items.ContainsKey("sso_login"))
+                        {
+                            return Task.CompletedTask;
+                        }
+                        // Otherwise, don't redirect (let cookie auth handle it)
+                        context.HandleResponse();
+                        return Task.CompletedTask;
+                    },
+                    OnTokenValidated = async context =>
+                    {
+                        // After OIDC token is validated, we need to find or create a local user
+                        // and sign them in with the Identity cookie
+                        var principal = context.Principal;
+                        if (principal == null) return;
+
+                        var email = principal.FindFirstValue(ClaimTypes.Email)
+                            ?? principal.FindFirstValue("email");
+                        var preferredUsername = principal.FindFirstValue("preferred_username")
+                            ?? principal.FindFirstValue(ClaimTypes.Name)
+                            ?? principal.FindFirstValue("name");
+                        var sub = principal.FindFirstValue(ClaimTypes.NameIdentifier)
+                            ?? principal.FindFirstValue("sub");
+
+                        // Store SSO claims in auth properties for the callback endpoint to use
+                        context.Properties!.Items["sso_email"] = email ?? string.Empty;
+                        context.Properties!.Items["sso_username"] = preferredUsername ?? string.Empty;
+                        context.Properties!.Items["sso_sub"] = sub ?? string.Empty;
+                        context.Properties!.Items["sso_provider"] = "oidc";
+                    }
+                };
+            });
+
+        Console.WriteLine($"[SSO] OpenID Connect enabled: authority={ssoAuthority}, clientId={ssoClientId}");
+    }
+    else
+    {
+        Console.WriteLine("[SSO] OpenID Connect is not enabled (missing or incomplete configuration)");
+    }
+}
+
 // Add IdentityCore for credential validation against shared DB
 builder.Services
     .AddIdentityCore<ApplicationUser>(options =>
@@ -1087,6 +1210,177 @@ app.MapPost("/api/login", async (
         return Results.Redirect("/login?error=1");
     }
 }).DisableAntiforgery();
+
+// === SSO Login Endpoints ===
+
+// GET /api/sso/login - Initiates SSO login by redirecting to the OIDC provider
+app.MapGet("/api/sso/login", (HttpContext context, IConfiguration config) =>
+{
+    var ssoEnabled = config["Sso:Enabled"] == "true";
+    if (!ssoEnabled)
+    {
+        return Results.Redirect("/login?error=sso_disabled");
+    }
+
+    var properties = new Microsoft.AspNetCore.Authentication.AuthenticationProperties
+    {
+        RedirectUri = "/api/sso/complete",
+        IsPersistent = true
+    };
+    properties.Items["sso_login"] = "true";
+
+    return Results.Challenge(properties, new[] { "oidc" });
+}).AllowAnonymous();
+
+// GET /api/sso/complete - Handles the post-OIDC-callback user provisioning and Identity sign-in
+app.MapGet("/api/sso/complete", async (
+    HttpContext context,
+    UserManager<ApplicationUser> userManager,
+    SignInManager<ApplicationUser> signInManager,
+    HnHMapperServer.Infrastructure.Data.ApplicationDbContext db,
+    IConfiguration config,
+    ILogger<Program> logger) =>
+{
+    // The OIDC middleware has already validated the token and set the external principal
+    var result = await context.AuthenticateAsync("oidc");
+    if (!result.Succeeded || result.Principal == null)
+    {
+        logger.LogWarning("SSO: Authentication result failed");
+        return Results.Redirect("/login?error=sso_failed");
+    }
+
+    var items = result.Properties?.Items;
+    var ssoEmail = (items != null && items.TryGetValue("sso_email", out var e) ? e : null) ?? string.Empty;
+    var ssoUsername = (items != null && items.TryGetValue("sso_username", out var u) ? u : null) ?? string.Empty;
+    var ssoSub = (items != null && items.TryGetValue("sso_sub", out var s) ? s : null) ?? string.Empty;
+
+    if (string.IsNullOrWhiteSpace(ssoUsername) && string.IsNullOrWhiteSpace(ssoEmail))
+    {
+        logger.LogWarning("SSO: No username or email in OIDC claims (sub={Sub})", ssoSub);
+        return Results.Redirect("/login?error=sso_no_identity");
+    }
+
+    // Try to find existing user by external login
+    var existingLogin = await userManager.FindByLoginAsync("oidc", ssoSub);
+    ApplicationUser? user = existingLogin;
+
+    // If no external login link, try to find by username or email
+    if (user == null && !string.IsNullOrWhiteSpace(ssoUsername))
+    {
+        user = await userManager.FindByNameAsync(ssoUsername);
+    }
+    if (user == null && !string.IsNullOrWhiteSpace(ssoEmail))
+    {
+        user = await userManager.FindByEmailAsync(ssoEmail);
+    }
+
+    var autoCreate = config["Sso:AutoCreateUsers"] == "true";
+    var defaultTenantId = config["Sso:DefaultTenantId"];
+
+    if (user == null)
+    {
+        if (!autoCreate)
+        {
+            logger.LogWarning("SSO: No local account found for {Username}/{Email} and auto-create is disabled",
+                ssoUsername, ssoEmail);
+            return Results.Redirect("/login?error=sso_no_account");
+        }
+
+        // Auto-create user
+        var username = !string.IsNullOrWhiteSpace(ssoUsername) ? ssoUsername : ssoEmail;
+
+        // Ensure username is unique
+        var baseUsername = username!;
+        var suffix = 0;
+        while (await userManager.FindByNameAsync(username!) != null)
+        {
+            suffix++;
+            username = $"{baseUsername}_{suffix}";
+        }
+
+        user = new ApplicationUser
+        {
+            UserName = username,
+            Email = ssoEmail,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        // Create user without password (SSO-only account)
+        var createResult = await userManager.CreateAsync(user);
+        if (!createResult.Succeeded)
+        {
+            var errors = string.Join(", ", createResult.Errors.Select(e => e.Description));
+            logger.LogError("SSO: Failed to create user {Username}: {Errors}", username, errors);
+            return Results.Redirect("/login?error=sso_create_failed");
+        }
+
+        logger.LogInformation("SSO: Created new user {Username} (email={Email}, sub={Sub})", username, ssoEmail, ssoSub);
+
+        // Auto-assign to default tenant if configured
+        if (!string.IsNullOrWhiteSpace(defaultTenantId))
+        {
+            var tenant = await db.Tenants
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(t => t.Id == defaultTenantId && t.IsActive);
+
+            if (tenant != null)
+            {
+                var tenantUser = new HnHMapperServer.Core.Models.TenantUserEntity
+                {
+                    TenantId = defaultTenantId,
+                    UserId = user.Id,
+                    Role = HnHMapperServer.Core.Enums.TenantRole.TenantUser,
+                    JoinedAt = default // Pending approval
+                };
+                db.TenantUsers.Add(tenantUser);
+                await db.SaveChangesAsync();
+                logger.LogInformation("SSO: Auto-assigned user {Username} to tenant {TenantId} (pending approval)",
+                    username, defaultTenantId);
+            }
+        }
+    }
+
+    // Link external login if not already linked
+    if (existingLogin == null && !string.IsNullOrWhiteSpace(ssoSub))
+    {
+        var addLoginResult = await userManager.AddLoginAsync(user,
+            new UserLoginInfo("oidc", ssoSub, "OpenID Connect"));
+        if (!addLoginResult.Succeeded)
+        {
+            logger.LogWarning("SSO: Failed to link external login for {Username}: {Errors}",
+                user.UserName, string.Join(", ", addLoginResult.Errors.Select(e => e.Description)));
+        }
+    }
+
+    // Check if user has any tenant assignment
+    var hasTenant = await db.TenantUsers
+        .IgnoreQueryFilters()
+        .AnyAsync(tu => tu.UserId == user.Id && tu.JoinedAt != default);
+
+    if (!hasTenant)
+    {
+        // Sign in anyway so they can see the pending page
+        await signInManager.SignInAsync(user, isPersistent: true);
+        logger.LogInformation("SSO: User {Username} signed in but has no tenant assignment", user.UserName);
+        return Results.Redirect("/pending-assignment");
+    }
+
+    // Sign in with Identity cookie (TenantClaimsPrincipalFactory will add tenant claims)
+    await signInManager.SignInAsync(user, isPersistent: true);
+    logger.LogInformation("SSO: User {Username} signed in successfully via SSO", user.UserName);
+
+    // Redirect to login page which will handle tenant selection via sessionStorage flow
+    // We need to go through the same tenant selection flow as regular login
+    return Results.Redirect("/");
+}).AllowAnonymous();
+
+// GET /api/sso/status - Check if SSO is enabled (used by Login.razor, no auth required)
+app.MapGet("/api/sso/status", (IConfiguration config) =>
+{
+    var enabled = config["Sso:Enabled"] == "true";
+    var displayName = config["Sso:DisplayName"] ?? "SSO Login";
+    return Results.Ok(new { enabled, displayName });
+}).AllowAnonymous();
 
 // Support both GET and POST for logout (GET for navigation, POST for form submission)
 app.MapGet("/api/logout", async (HttpContext context) =>

@@ -72,6 +72,20 @@ public static class SuperadminEndpoints
         // PUT /api/superadmin/config/{key} - Update a single configuration value
         group.MapPut("/config/{key}", UpdateConfig);
 
+        // === SSO Configuration ===
+
+        // GET /api/superadmin/sso - Get SSO configuration
+        group.MapGet("/sso", GetSsoConfig);
+
+        // PUT /api/superadmin/sso - Update SSO configuration
+        group.MapPut("/sso", UpdateSsoConfig);
+
+        // POST /api/superadmin/sso/test - Test SSO configuration connectivity
+        group.MapPost("/sso/test", TestSsoConfig);
+
+        // DELETE /api/superadmin/sso - Clear SSO configuration
+        group.MapDelete("/sso", ClearSsoConfig);
+
         // PUT /api/superadmin/tenants/{tenantId}/users/{userId}/permissions - Update user permissions
         group.MapPut("/tenants/{tenantId}/users/{userId}/permissions", UpdateUserPermissions);
 
@@ -637,6 +651,214 @@ public static class SuperadminEndpoints
         {
             logger.LogError(ex, "Error updating config {Key}", key);
             return Results.Problem("Failed to update config");
+        }
+    }
+
+    // === SSO Configuration Endpoints ===
+
+    /// <summary>
+    /// GET /api/superadmin/sso
+    /// Gets the current SSO/OIDC configuration
+    /// </summary>
+    private static async Task<IResult> GetSsoConfig(
+        IConfigRepository configRepository,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            var enabled = await configRepository.GetGlobalValueAsync("sso:enabled");
+            var authority = await configRepository.GetGlobalValueAsync("sso:authority");
+            var clientId = await configRepository.GetGlobalValueAsync("sso:clientId");
+            var clientSecret = await configRepository.GetGlobalValueAsync("sso:clientSecret");
+            var displayName = await configRepository.GetGlobalValueAsync("sso:displayName");
+            var autoCreateUsers = await configRepository.GetGlobalValueAsync("sso:autoCreateUsers");
+            var defaultTenantId = await configRepository.GetGlobalValueAsync("sso:defaultTenantId");
+            var scopes = await configRepository.GetGlobalValueAsync("sso:scopes");
+
+            return Results.Ok(new SsoConfigDto
+            {
+                Enabled = enabled == "true",
+                Authority = authority ?? string.Empty,
+                ClientId = clientId ?? string.Empty,
+                HasClientSecret = !string.IsNullOrEmpty(clientSecret),
+                DisplayName = displayName ?? "SSO Login",
+                AutoCreateUsers = autoCreateUsers == "true",
+                DefaultTenantId = defaultTenantId ?? string.Empty,
+                Scopes = scopes ?? "openid profile email"
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error loading SSO config");
+            return Results.Problem("Failed to load SSO configuration");
+        }
+    }
+
+    /// <summary>
+    /// PUT /api/superadmin/sso
+    /// Updates the SSO/OIDC configuration
+    /// </summary>
+    private static async Task<IResult> UpdateSsoConfig(
+        UpdateSsoConfigDto dto,
+        IConfigRepository configRepository,
+        IAuditService auditService,
+        HttpContext context,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            // Validate required fields when enabling SSO
+            if (dto.Enabled)
+            {
+                if (string.IsNullOrWhiteSpace(dto.Authority))
+                    return Results.BadRequest(new { error = "Authority URL is required when SSO is enabled" });
+                if (string.IsNullOrWhiteSpace(dto.ClientId))
+                    return Results.BadRequest(new { error = "Client ID is required when SSO is enabled" });
+                // Client secret is only required if not already set
+                var existingSecret = await configRepository.GetGlobalValueAsync("sso:clientSecret");
+                if (string.IsNullOrWhiteSpace(dto.ClientSecret) && string.IsNullOrEmpty(existingSecret))
+                    return Results.BadRequest(new { error = "Client Secret is required when SSO is enabled" });
+            }
+
+            await configRepository.SetGlobalValueAsync("sso:enabled", dto.Enabled ? "true" : "false");
+            await configRepository.SetGlobalValueAsync("sso:authority", dto.Authority?.Trim() ?? string.Empty);
+            await configRepository.SetGlobalValueAsync("sso:clientId", dto.ClientId?.Trim() ?? string.Empty);
+            await configRepository.SetGlobalValueAsync("sso:displayName", dto.DisplayName?.Trim() ?? "SSO Login");
+            await configRepository.SetGlobalValueAsync("sso:autoCreateUsers", dto.AutoCreateUsers ? "true" : "false");
+            await configRepository.SetGlobalValueAsync("sso:defaultTenantId", dto.DefaultTenantId?.Trim() ?? string.Empty);
+            await configRepository.SetGlobalValueAsync("sso:scopes", dto.Scopes?.Trim() ?? "openid profile email");
+
+            // Only update client secret if a new one was provided
+            if (!string.IsNullOrWhiteSpace(dto.ClientSecret))
+            {
+                await configRepository.SetGlobalValueAsync("sso:clientSecret", dto.ClientSecret.Trim());
+            }
+
+            var username = context.User.Identity?.Name ?? "Unknown";
+            await auditService.LogAsync(new AuditEntry
+            {
+                TenantId = null,
+                UserId = username,
+                Action = "SsoConfigUpdated",
+                EntityType = "Config",
+                EntityId = "sso",
+                OldValue = null,
+                NewValue = $"enabled={dto.Enabled}, authority={dto.Authority}, clientId={dto.ClientId}"
+            });
+
+            logger.LogInformation("SuperAdmin {Username}: Updated SSO config (enabled={Enabled}, authority={Authority})",
+                username, dto.Enabled, dto.Authority);
+
+            return Results.Ok(new { message = "SSO configuration updated. Restart the application for changes to take effect." });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error updating SSO config");
+            return Results.Problem("Failed to update SSO configuration");
+        }
+    }
+
+    /// <summary>
+    /// POST /api/superadmin/sso/test
+    /// Tests SSO configuration by attempting to reach the OIDC discovery endpoint
+    /// </summary>
+    private static async Task<IResult> TestSsoConfig(
+        IConfigRepository configRepository,
+        IHttpClientFactory httpClientFactory,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            var authority = await configRepository.GetGlobalValueAsync("sso:authority");
+            if (string.IsNullOrWhiteSpace(authority))
+                return Results.BadRequest(new { error = "Authority URL is not configured" });
+
+            // Try to reach the OIDC discovery endpoint
+            var discoveryUrl = authority.TrimEnd('/') + "/.well-known/openid-configuration";
+            var httpClient = httpClientFactory.CreateClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+            var response = await httpClient.GetAsync(discoveryUrl);
+            if (response.IsSuccessStatusCode)
+            {
+                var content = await response.Content.ReadAsStringAsync();
+                // Try to parse as JSON to verify it's a valid OIDC discovery document
+                var doc = JsonSerializer.Deserialize<JsonElement>(content);
+                var issuer = doc.TryGetProperty("issuer", out var issuerProp) ? issuerProp.GetString() : null;
+                var authEndpoint = doc.TryGetProperty("authorization_endpoint", out var authProp) ? authProp.GetString() : null;
+                var tokenEndpoint = doc.TryGetProperty("token_endpoint", out var tokenProp) ? tokenProp.GetString() : null;
+
+                return Results.Ok(new
+                {
+                    success = true,
+                    issuer,
+                    authorizationEndpoint = authEndpoint,
+                    tokenEndpoint = tokenEndpoint,
+                    message = "Successfully connected to OIDC provider"
+                });
+            }
+            else
+            {
+                return Results.Ok(new
+                {
+                    success = false,
+                    message = $"OIDC discovery endpoint returned {response.StatusCode}"
+                });
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            return Results.Ok(new { success = false, message = $"Connection failed: {ex.Message}" });
+        }
+        catch (TaskCanceledException)
+        {
+            return Results.Ok(new { success = false, message = "Connection timed out (10s)" });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error testing SSO config");
+            return Results.Ok(new { success = false, message = $"Error: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// DELETE /api/superadmin/sso
+    /// Clears all SSO configuration
+    /// </summary>
+    private static async Task<IResult> ClearSsoConfig(
+        IConfigRepository configRepository,
+        IAuditService auditService,
+        HttpContext context,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            await configRepository.SetGlobalValueAsync("sso:enabled", "false");
+            await configRepository.SetGlobalValueAsync("sso:authority", string.Empty);
+            await configRepository.SetGlobalValueAsync("sso:clientId", string.Empty);
+            await configRepository.SetGlobalValueAsync("sso:clientSecret", string.Empty);
+            await configRepository.SetGlobalValueAsync("sso:displayName", "SSO Login");
+            await configRepository.SetGlobalValueAsync("sso:autoCreateUsers", "false");
+            await configRepository.SetGlobalValueAsync("sso:defaultTenantId", string.Empty);
+            await configRepository.SetGlobalValueAsync("sso:scopes", "openid profile email");
+
+            var username = context.User.Identity?.Name ?? "Unknown";
+            await auditService.LogAsync(new AuditEntry
+            {
+                TenantId = null,
+                UserId = username,
+                Action = "SsoConfigCleared",
+                EntityType = "Config",
+                EntityId = "sso"
+            });
+
+            logger.LogInformation("SuperAdmin {Username}: Cleared SSO config", username);
+            return Results.Ok(new { message = "SSO configuration cleared" });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error clearing SSO config");
+            return Results.Problem("Failed to clear SSO configuration");
         }
     }
 
@@ -2806,3 +3028,33 @@ public record AssignUserToTenantDto(
     string Role,
     List<string> Permissions
 );
+
+/// <summary>
+/// DTO for SSO configuration (response - never exposes client secret)
+/// </summary>
+public record SsoConfigDto
+{
+    public bool Enabled { get; init; }
+    public string Authority { get; init; } = string.Empty;
+    public string ClientId { get; init; } = string.Empty;
+    public bool HasClientSecret { get; init; }
+    public string DisplayName { get; init; } = "SSO Login";
+    public bool AutoCreateUsers { get; init; }
+    public string DefaultTenantId { get; init; } = string.Empty;
+    public string Scopes { get; init; } = "openid profile email";
+}
+
+/// <summary>
+/// DTO for updating SSO configuration (request)
+/// </summary>
+public record UpdateSsoConfigDto
+{
+    public bool Enabled { get; init; }
+    public string? Authority { get; init; }
+    public string? ClientId { get; init; }
+    public string? ClientSecret { get; init; }
+    public string? DisplayName { get; init; }
+    public bool AutoCreateUsers { get; init; }
+    public string? DefaultTenantId { get; init; }
+    public string? Scopes { get; init; }
+}

@@ -1,0 +1,425 @@
+﻿@inject IHttpClientFactory HttpClientFactory
+@inject ISnackbar Snackbar
+@inject ILogger<SsoManagement> Logger
+
+<MudText Typo="Typo.h5" Class="mb-4">
+    <MudIcon Icon="@Icons.Material.Filled.Security" Class="me-2" />
+    SSO / OpenID Connect Configuration
+</MudText>
+
+@if (_isLoading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else
+{
+    <MudPaper Elevation="2" Class="pa-4">
+        <MudText Typo="Typo.h6" Class="mb-2">Identity Provider Settings</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            Configure an external OpenID Connect (OIDC) identity provider such as authentik, Keycloak, or Authelia
+            to allow users to log in via Single Sign-On. Changes require an application restart to take effect.
+        </MudText>
+
+        <MudStack Spacing="3">
+            <MudSwitch @bind-Value="_enabled"
+                       Color="Color.Primary"
+                       Label="@(_enabled ? "SSO Enabled" : "SSO Disabled")">
+            </MudSwitch>
+
+            <MudTextField @bind-Value="_displayName"
+                          Label="Button Display Name"
+                          Variant="Variant.Outlined"
+                          HelperText="Text shown on the SSO login button (e.g., 'Sign in with authentik')"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Label"
+                          Disabled="@(!_enabled)" />
+
+            <MudTextField @bind-Value="_authority"
+                          Label="Authority URL"
+                          Variant="Variant.Outlined"
+                          HelperText="OIDC issuer URL (e.g., https://auth.example.com/application/o/hnhmapper/)"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Link"
+                          Disabled="@(!_enabled)"
+                          Required="@_enabled" />
+
+            <MudTextField @bind-Value="_clientId"
+                          Label="Client ID"
+                          Variant="Variant.Outlined"
+                          HelperText="OAuth2 Client ID from your identity provider"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Key"
+                          Disabled="@(!_enabled)"
+                          Required="@_enabled" />
+
+            <MudTextField @bind-Value="_clientSecret"
+                          Label="Client Secret"
+                          Variant="Variant.Outlined"
+                          InputType="InputType.Password"
+                          HelperText="@(_hasExistingSecret ? "Leave blank to keep existing secret, or enter a new one to replace it" : "OAuth2 Client Secret from your identity provider")"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Lock"
+                          Disabled="@(!_enabled)"
+                          Placeholder="@(_hasExistingSecret ? "••••••••" : "")" />
+
+            <MudTextField @bind-Value="_scopes"
+                          Label="Scopes"
+                          Variant="Variant.Outlined"
+                          HelperText="Space-separated OIDC scopes (default: openid profile email)"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Checklist"
+                          Disabled="@(!_enabled)" />
+        </MudStack>
+
+        <MudDivider Class="my-4" />
+
+        <MudText Typo="Typo.h6" Class="mb-2">User Provisioning</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            Control how SSO-authenticated users are handled when they don't have a local account.
+        </MudText>
+
+        <MudStack Spacing="3">
+            <MudSwitch @bind-Value="_autoCreateUsers"
+                       Color="Color.Primary"
+                       Label="@(_autoCreateUsers ? "Auto-create local accounts for SSO users" : "Require existing local account for SSO login")"
+                       Disabled="@(!_enabled)">
+            </MudSwitch>
+
+            @if (_autoCreateUsers)
+            {
+                <MudTextField @bind-Value="_defaultTenantId"
+                              Label="Default Tenant ID"
+                              Variant="Variant.Outlined"
+                              HelperText="Tenant to auto-assign new SSO users to (leave blank for no auto-assignment — SuperAdmin assigns manually)"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Business"
+                              Disabled="@(!_enabled)" />
+            }
+        </MudStack>
+
+        <MudStack Row="true" Spacing="2" Class="mt-4">
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       OnClick="SaveConfig"
+                       Disabled="@_isSaving">
+                @if (_isSaving)
+                {
+                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                    <MudText Class="ms-2">Saving...</MudText>
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.Save" Class="me-2" />
+                    <MudText>Save SSO Settings</MudText>
+                }
+            </MudButton>
+
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Info"
+                       OnClick="TestConnection"
+                       Disabled="@(_isTesting || !_enabled || string.IsNullOrWhiteSpace(_authority))"
+                       StartIcon="@Icons.Material.Filled.NetworkCheck">
+                @if (_isTesting)
+                {
+                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                    <MudText Class="ms-2">Testing...</MudText>
+                }
+                else
+                {
+                    <MudText>Test Connection</MudText>
+                }
+            </MudButton>
+
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Secondary"
+                       OnClick="LoadConfig"
+                       Disabled="@_isLoading"
+                       StartIcon="@Icons.Material.Filled.Refresh">
+                Reset
+            </MudButton>
+
+            <MudButton Variant="Variant.Outlined"
+                       Color="Color.Error"
+                       OnClick="ClearConfig"
+                       Disabled="@_isClearing"
+                       StartIcon="@Icons.Material.Filled.DeleteForever">
+                Clear All
+            </MudButton>
+        </MudStack>
+    </MudPaper>
+
+    @if (_testResult != null)
+    {
+        <MudPaper Elevation="2" Class="pa-4 mt-4">
+            <MudText Typo="Typo.h6" Class="mb-2">
+                <MudIcon Icon="@(_testResult.Success ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Error)"
+                         Color="@(_testResult.Success ? Color.Success : Color.Error)"
+                         Class="me-2" />
+                Connection Test Result
+            </MudText>
+
+            <MudAlert Severity="@(_testResult.Success ? Severity.Success : Severity.Error)"
+                      Variant="Variant.Outlined" Class="mb-3">
+                @_testResult.Message
+            </MudAlert>
+
+            @if (_testResult.Success)
+            {
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead>
+                        <tr>
+                            <th>Property</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!string.IsNullOrEmpty(_testResult.Issuer))
+                        {
+                            <tr>
+                                <td><strong>Issuer</strong></td>
+                                <td><code>@_testResult.Issuer</code></td>
+                            </tr>
+                        }
+                        @if (!string.IsNullOrEmpty(_testResult.AuthorizationEndpoint))
+                        {
+                            <tr>
+                                <td><strong>Authorization Endpoint</strong></td>
+                                <td><code>@_testResult.AuthorizationEndpoint</code></td>
+                            </tr>
+                        }
+                        @if (!string.IsNullOrEmpty(_testResult.TokenEndpoint))
+                        {
+                            <tr>
+                                <td><strong>Token Endpoint</strong></td>
+                                <td><code>@_testResult.TokenEndpoint</code></td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        </MudPaper>
+    }
+
+    <MudPaper Elevation="1" Class="pa-4 mt-4">
+        <MudText Typo="Typo.h6" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Help" Class="me-2" />
+            Setup Guide
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            <strong>1.</strong> In your identity provider (authentik, Keycloak, etc.), create a new OAuth2/OIDC application.
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            <strong>2.</strong> Set the <strong>Redirect URI</strong> to: <code>@_redirectUri</code>
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            <strong>3.</strong> Copy the <strong>Authority URL</strong>, <strong>Client ID</strong>, and <strong>Client Secret</strong> into the fields above.
+        </MudText>
+        <MudText Typo="Typo.body2" Class="mb-2">
+            <strong>4.</strong> Enable SSO and save. <strong>Restart the application</strong> for changes to take effect.
+        </MudText>
+        <MudText Typo="Typo.body2">
+            <strong>5.</strong> Users will see a <em>"@(_displayName)"</em> button on the login page.
+        </MudText>
+    </MudPaper>
+}
+
+@code {
+    private bool _isLoading = true;
+    private bool _isSaving = false;
+    private bool _isTesting = false;
+    private bool _isClearing = false;
+
+    private bool _enabled;
+    private string _authority = string.Empty;
+    private string _clientId = string.Empty;
+    private string _clientSecret = string.Empty;
+    private string _displayName = "SSO Login";
+    private string _scopes = "openid profile email";
+    private bool _autoCreateUsers;
+    private string _defaultTenantId = string.Empty;
+    private bool _hasExistingSecret;
+    private string _redirectUri = string.Empty;
+
+    private TestResultModel? _testResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Build redirect URI from current request
+        _redirectUri = "/api/sso/callback";
+        await LoadConfig();
+    }
+
+    private async Task LoadConfig()
+    {
+        _isLoading = true;
+        _testResult = null;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient("API");
+            var response = await httpClient.GetAsync("/api/superadmin/sso");
+
+            if (response.IsSuccessStatusCode)
+            {
+                var config = await response.Content.ReadFromJsonAsync<SsoConfigResponse>();
+                if (config != null)
+                {
+                    _enabled = config.Enabled;
+                    _authority = config.Authority;
+                    _clientId = config.ClientId;
+                    _displayName = config.DisplayName;
+                    _autoCreateUsers = config.AutoCreateUsers;
+                    _defaultTenantId = config.DefaultTenantId;
+                    _scopes = config.Scopes;
+                    _hasExistingSecret = config.HasClientSecret;
+                    _clientSecret = string.Empty;
+                }
+            }
+            else
+            {
+                Snackbar.Add("Failed to load SSO configuration", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading SSO config");
+            Snackbar.Add($"Error loading SSO configuration: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private async Task SaveConfig()
+    {
+        _isSaving = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient("API");
+            var payload = new
+            {
+                enabled = _enabled,
+                authority = _authority,
+                clientId = _clientId,
+                clientSecret = string.IsNullOrWhiteSpace(_clientSecret) ? null : _clientSecret,
+                displayName = _displayName,
+                autoCreateUsers = _autoCreateUsers,
+                defaultTenantId = _defaultTenantId,
+                scopes = _scopes
+            };
+
+            var response = await httpClient.PutAsJsonAsync("/api/superadmin/sso", payload);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<MessageResponse>();
+                Snackbar.Add(result?.Message ?? "SSO configuration saved", Severity.Success);
+                await LoadConfig();
+            }
+            else
+            {
+                var error = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+                Snackbar.Add(error?.Error ?? "Failed to save SSO configuration", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving SSO config");
+            Snackbar.Add($"Error saving SSO configuration: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task TestConnection()
+    {
+        _isTesting = true;
+        _testResult = null;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient("API");
+            var response = await httpClient.PostAsync("/api/superadmin/sso/test", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                _testResult = await response.Content.ReadFromJsonAsync<TestResultModel>();
+            }
+            else
+            {
+                var error = await response.Content.ReadFromJsonAsync<ErrorResponse>();
+                _testResult = new TestResultModel { Success = false, Message = error?.Error ?? "Test failed" };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error testing SSO connection");
+            _testResult = new TestResultModel { Success = false, Message = $"Error: {ex.Message}" };
+        }
+        finally
+        {
+            _isTesting = false;
+        }
+    }
+
+    private async Task ClearConfig()
+    {
+        _isClearing = true;
+        try
+        {
+            var httpClient = HttpClientFactory.CreateClient("API");
+            var response = await httpClient.DeleteAsync("/api/superadmin/sso");
+
+            if (response.IsSuccessStatusCode)
+            {
+                Snackbar.Add("SSO configuration cleared", Severity.Success);
+                await LoadConfig();
+            }
+            else
+            {
+                Snackbar.Add("Failed to clear SSO configuration", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error clearing SSO config");
+            Snackbar.Add($"Error: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isClearing = false;
+        }
+    }
+
+    private class SsoConfigResponse
+    {
+        public bool Enabled { get; set; }
+        public string Authority { get; set; } = string.Empty;
+        public string ClientId { get; set; } = string.Empty;
+        public bool HasClientSecret { get; set; }
+        public string DisplayName { get; set; } = "SSO Login";
+        public bool AutoCreateUsers { get; set; }
+        public string DefaultTenantId { get; set; } = string.Empty;
+        public string Scopes { get; set; } = "openid profile email";
+    }
+
+    private class TestResultModel
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? Issuer { get; set; }
+        public string? AuthorizationEndpoint { get; set; }
+        public string? TokenEndpoint { get; set; }
+    }
+
+    private class MessageResponse
+    {
+        public string? Message { get; set; }
+    }
+
+    private class ErrorResponse
+    {
+        public string? Error { get; set; }
+    }
+}

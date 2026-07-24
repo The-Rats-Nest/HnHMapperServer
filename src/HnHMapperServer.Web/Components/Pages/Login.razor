@@ -74,6 +74,19 @@
             </MudStack>
         </MudForm>
 
+        @if (_ssoEnabled)
+        {
+            <MudDivider Class="my-4" />
+            <MudButton Href="/api/sso/login"
+                       Variant="Variant.Filled"
+                       Color="Color.Secondary"
+                       FullWidth="true"
+                       Size="Size.Large"
+                       StartIcon="@Icons.Material.Filled.Security">
+                @_ssoDisplayName
+            </MudButton>
+        }
+
         @if (_selfRegistrationEnabled)
         {
             <MudDivider Class="my-4" />
@@ -120,6 +133,8 @@
     private bool _registered;
     private bool _selfRegistrationEnabled = true;
     private bool _hasCheckedPendingLogin = false;
+    private bool _ssoEnabled = false;
+    private string _ssoDisplayName = "SSO Login";
 
     protected override void OnInitialized()
     {
@@ -133,11 +148,35 @@
         // Check if self-registration is enabled (default true if not set)
         _selfRegistrationEnabled = Configuration.GetValue<bool?>("SelfRegistration:Enabled") ?? true;
 
+        // Check if SSO is enabled
+        _ssoEnabled = Configuration["Sso:Enabled"] == "true";
+        _ssoDisplayName = Configuration["Sso:DisplayName"] ?? "SSO Login";
+
         // Check for query parameters
         _registered = Registered == "1";
         if (Error == "1")
         {
             _errorMessage = "Invalid username or password";
+        }
+        else if (Error == "sso_disabled")
+        {
+            _errorMessage = "SSO is not enabled";
+        }
+        else if (Error == "sso_failed")
+        {
+            _errorMessage = "SSO authentication failed. Please try again.";
+        }
+        else if (Error == "sso_no_identity")
+        {
+            _errorMessage = "SSO provider did not return a username or email.";
+        }
+        else if (Error == "sso_no_account")
+        {
+            _errorMessage = "No local account found for your SSO identity. Contact an administrator.";
+        }
+        else if (Error == "sso_create_failed")
+        {
+            _errorMessage = "Failed to create account from SSO. Contact an administrator.";
         }
     }
 

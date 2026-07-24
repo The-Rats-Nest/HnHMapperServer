@@ -82,6 +82,11 @@
         <MudTabPanel Text="Config" Icon="@Icons.Material.Filled.Tune">
             <ConfigManagement />
         </MudTabPanel>
+
+        @* SSO Configuration Tab *@
+        <MudTabPanel Text="SSO" Icon="@Icons.Material.Filled.Security">
+            <SsoManagement />
+        </MudTabPanel>
     </MudTabs>
 
     <MudButton Variant="Variant.Text" Color="Color.Default" Href="/" Class="mt-4" StartIcon="@Icons.Material.Filled.ArrowBack">
