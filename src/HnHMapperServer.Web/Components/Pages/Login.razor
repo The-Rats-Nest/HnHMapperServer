@@ -205,9 +205,20 @@
 
                     if (tenants.Count == 1)
                     {
-                        // Auto-select the only tenant via server-side endpoint
-                        // that properly sets the authentication cookie
-                        NavigationManager.NavigateTo($"/api/select-tenant/{tenants[0].Id}", forceLoad: true);
+                        // Auto-select the only tenant
+                        var tenant = tenants[0];
+                        var selectSuccess = await TenantService.SelectTenantAsync(tenant.Id);
+
+                        if (selectSuccess)
+                        {
+                            TenantContext.SetCurrentTenant(tenant);
+                            NavigationManager.NavigateTo("/", forceLoad: true);
+                        }
+                        else
+                        {
+                            Logger.LogError("Failed to select tenant {TenantId}", tenant.Id);
+                            NavigationManager.NavigateTo("/login?error=1", forceLoad: true);
+                        }
                     }
                     else
                     {
