@@ -6,6 +6,7 @@ using HnHMapperServer.Infrastructure.Data;
 using HnHMapperServer.Infrastructure.Identity;
 using HnHMapperServer.Core.Constants;
 using HnHMapperServer.Core.Extensions;
+using Microsoft.AspNetCore.Http;
 
 namespace HnHMapperServer.Web.Security;
 
@@ -16,6 +17,7 @@ namespace HnHMapperServer.Web.Security;
 public class TenantClaimsPrincipalFactory : UserClaimsPrincipalFactory<ApplicationUser, IdentityRole>
 {
     private readonly ApplicationDbContext _db;
+    private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<TenantClaimsPrincipalFactory> _logger;
 
     public TenantClaimsPrincipalFactory(
@@ -23,10 +25,12 @@ public class TenantClaimsPrincipalFactory : UserClaimsPrincipalFactory<Applicati
         RoleManager<IdentityRole> roleManager,
         IOptions<IdentityOptions> optionsAccessor,
         ApplicationDbContext db,
+        IHttpContextAccessor httpContextAccessor,
         ILogger<TenantClaimsPrincipalFactory> logger)
         : base(userManager, roleManager, optionsAccessor)
     {
         _db = db;
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger;
     }
 
@@ -34,10 +38,17 @@ public class TenantClaimsPrincipalFactory : UserClaimsPrincipalFactory<Applicati
     {
         var identity = await base.GenerateClaimsAsync(user);
 
-        // Load user's tenant assignment (first approved tenant)
-        var tenantUser = await _db.TenantUsers
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(tu => tu.UserId == user.Id && tu.JoinedAt != default);
+        // Check if a specific tenant was selected (set by SelectTenant endpoint via HttpContext.Items)
+        var selectedTenantId = _httpContextAccessor.HttpContext?.Items["SelectedTenantId"] as string;
+
+        // Load user's tenant assignment — use selected tenant if specified, otherwise first approved tenant
+        var tenantUser = selectedTenantId != null
+            ? await _db.TenantUsers
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(tu => tu.UserId == user.Id && tu.TenantId == selectedTenantId && tu.JoinedAt != default)
+            : await _db.TenantUsers
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(tu => tu.UserId == user.Id && tu.JoinedAt != default);
 
         if (tenantUser != null)
         {

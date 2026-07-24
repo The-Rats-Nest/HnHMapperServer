@@ -276,7 +276,8 @@ public static class IdentityEndpoints
 		ClaimsPrincipal user,
 		UserManager<ApplicationUser> userManager,
 		SignInManager<ApplicationUser> signInManager,
-		ApplicationDbContext db)
+		ApplicationDbContext db,
+		HttpContext httpContext)
 	{
 		if (string.IsNullOrWhiteSpace(request.TenantId))
 			return Results.BadRequest(new { error = "Tenant ID is required" });
@@ -308,26 +309,13 @@ public static class IdentityEndpoints
 			.Select(tp => tp.Permission)
 			.ToListAsync();
 
-		// Update cookie claims to add TenantId and TenantRole
-		var claims = new List<Claim>
-		{
-			new Claim(ClaimTypes.NameIdentifier, identityUser.Id),
-			new Claim(ClaimTypes.Name, identityUser.UserName ?? string.Empty),
-			new Claim(AuthorizationConstants.ClaimTypes.TenantId, request.TenantId),
-			new Claim(AuthorizationConstants.ClaimTypes.TenantRole, tenantUser.Role.ToClaimValue()),
-			new Claim(ClaimTypes.Role, tenantUser.Role.ToClaimValue())  // Add as Role claim for [Authorize(Roles=...)]
-		};
+		// Set the selected tenant ID in HttpContext.Items so that
+		// TenantClaimsPrincipalFactory picks the correct tenant when
+		// regenerating claims during SignInAsync.
+		httpContext.Items["SelectedTenantId"] = request.TenantId;
 
-		// Add permission claims (must match TenantPermissionHandler)
-		foreach (var permission in permissions)
-		{
-			claims.Add(new Claim(AuthorizationConstants.ClaimTypes.TenantPermission, permission.ToClaimValue()));
-		}
-
-		var claimsIdentity = new ClaimsIdentity(claims, IdentityConstants.ApplicationScheme);
-		var claimsPrincipal = new ClaimsPrincipal(claimsIdentity);
-
-		// Sign in with updated claims
+		// Sign in with updated claims — the factory will use SelectedTenantId
+		// from HttpContext.Items to generate the correct tenant claims
 		await signInManager.SignInAsync(identityUser, new Microsoft.AspNetCore.Authentication.AuthenticationProperties
 		{
 			IsPersistent = true
