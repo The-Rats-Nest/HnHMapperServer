@@ -127,7 +127,7 @@ public class FoodCatalogService : IFoodCatalogService
 
     private static string CatalogCacheKey(string tenantId) => $"cookbook:catalog:{tenantId}";
 
-    public async Task<List<FoodDto>> GetCatalogAsync(CancellationToken ct = default)
+    public async Task<List<FoodDto>> GetCatalogAsync(string? genus = null, CancellationToken ct = default)
     {
         var tenantId = _tenantContext.GetCurrentTenantId();
         if (string.IsNullOrEmpty(tenantId))
@@ -173,7 +173,28 @@ public class FoodCatalogService : IFoodCatalogService
                 .ToList();
         });
 
+        if (genus != null && catalog != null)
+        {
+            catalog = catalog.Where(f => f.Genus.Equals(genus, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
         return catalog ?? new List<FoodDto>();
+    }
+
+    public async Task<List<string>> GetGenusListAsync(CancellationToken ct = default)
+    {
+        var tenantId = _tenantContext.GetCurrentTenantId();
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return new List<string>();
+        }
+
+        return await _dbContext.Foods
+            .AsNoTracking()
+            .Select(f => f.Genus)
+            .Distinct()
+            .OrderBy(g => g)
+            .ToListAsync(ct);
     }
 
     public async Task<CookbookStatusDto> GetStatusAsync(string tenantId, CancellationToken ct = default)
@@ -425,8 +446,9 @@ public class FoodCatalogService : IFoodCatalogService
             var name = NormalizeName(source.ItemName!);
             var signature = ComputeSignature(source.Ingredients);
 
+            var genus = source.Genus;
             var food = await _dbContext.Foods.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(f => f.TenantId == tenantId && f.Name == name, ct);
+                .FirstOrDefaultAsync(f => f.TenantId == tenantId && f.Name == name && f.Genus == genus, ct);
             if (food == null)
             {
                 food = BuildFoodEntity(name, source, wiki, tenantId, now, out _);
@@ -599,6 +621,7 @@ public class FoodCatalogService : IFoodCatalogService
             TenantId = tenantId,
             Name = name,
             ResourceName = baseRecord.ResourceName!.Trim(),
+            Genus = baseRecord.Genus,
             ImportedAt = importedAt,
             Ingredients = MapIngredients(baseRecord.Ingredients)
         };
@@ -673,6 +696,7 @@ public class FoodCatalogService : IFoodCatalogService
     {
         ItemName = upload.ItemName,
         ResourceName = upload.ResourceName,
+        Genus = (upload.Genus ?? string.Empty).Trim(),
         Energy = upload.Energy,
         Hunger = upload.Hunger,
         Feps = upload.Feps?
@@ -861,6 +885,7 @@ public class FoodCatalogService : IFoodCatalogService
         Id = entity.Id,
         Name = entity.Name,
         ResourceName = entity.ResourceName,
+        Genus = entity.Genus,
         Energy = entity.Energy,
         Hunger = entity.Hunger,
         WikiUrl = entity.WikiUrl,
@@ -883,6 +908,7 @@ public class FoodCatalogService : IFoodCatalogService
     {
         public string? ItemName { get; set; }
         public string? ResourceName { get; set; }
+        public string Genus { get; set; } = string.Empty;
         public decimal Hunger { get; set; }
         public decimal Energy { get; set; }
         public List<SourceFep>? Feps { get; set; }

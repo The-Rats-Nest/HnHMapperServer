@@ -40,7 +40,25 @@
                                   Variant="Variant.Outlined"
                                   Margin="Margin.Dense" />
                 </MudItem>
-                <MudItem xs="12" sm="6" md="4">
+                @if (_genera.Count > 1)
+                {
+                    <MudItem xs="12" sm="6" md="2">
+                        <MudSelect T="string"
+                                   Value="_selectedGenus"
+                                   ValueChanged="OnGenusChanged"
+                                   Label="World"
+                                   Variant="Variant.Outlined"
+                                   Margin="Margin.Dense"
+                                   Dense="true">
+                            <MudSelectItem T="string" Value="@((string?)null)">All worlds</MudSelectItem>
+                            @foreach (var g in _genera)
+                            {
+                                <MudSelectItem T="string" Value="@g">@(string.IsNullOrEmpty(g) ? "(unknown)" : g)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                }
+                <MudItem xs="12" sm="6" md="@(_genera.Count > 1 ? 2 : 4)">
                     <MudNumericField T="int"
                                      @bind-Value="_quality"
                                      Immediate="true"
@@ -968,12 +986,14 @@
     private bool _loadFailed;
     private string _search = string.Empty;
     private int _quality = 10;
+    private List<string> _genera = new();
+    private string? _selectedGenus;
 
     private double QualityMultiplier => Math.Sqrt(Math.Max(1, _quality) / 10.0);
 
     protected override async Task OnInitializedAsync()
     {
-        await Task.WhenAll(LoadCatalogAsync(), LoadPanelsAsync());
+        await Task.WhenAll(LoadGeneraAsync(), LoadCatalogAsync(), LoadPanelsAsync());
     }
 
     private async Task LoadCatalogAsync()
@@ -985,7 +1005,10 @@
         {
             var client = HttpClientFactory.CreateClient("API");
             var recipeIndexTask = LoadRecipeIndexAsync(client);
-            var foods = await client.GetFromJsonAsync<List<FoodDto>>("/api/v1/cookbook/foods") ?? new List<FoodDto>();
+            var url = _selectedGenus != null
+                ? $"/api/v1/cookbook/foods?genus={Uri.EscapeDataString(_selectedGenus)}"
+                : "/api/v1/cookbook/foods";
+            var foods = await client.GetFromJsonAsync<List<FoodDto>>(url) ?? new List<FoodDto>();
             await recipeIndexTask;
 
             _rows = foods.Select(food =>
@@ -1059,6 +1082,26 @@
         {
             // Recursive recipe expansion is progressive enhancement — the page works without it.
         }
+    }
+
+    private async Task LoadGeneraAsync()
+    {
+        try
+        {
+            var client = HttpClientFactory.CreateClient("API");
+            _genera = await client.GetFromJsonAsync<List<string>>("/api/v1/cookbook/genera") ?? new List<string>();
+        }
+        catch (Exception)
+        {
+            // Genus selector is progressive enhancement — the page works without it.
+        }
+    }
+
+    private async Task OnGenusChanged(string? value)
+    {
+        _selectedGenus = value;
+        await LoadCatalogAsync();
+        StateHasChanged();
     }
 
     /// <summary>Text search only — the chip rows show their counts over this set.</summary>

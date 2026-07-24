@@ -377,6 +377,13 @@ namespace HnHMapperServer.Infrastructure.Migrations
                     b.Property<int>("Energy")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Genus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<decimal>("Hunger")
                         .HasColumnType("TEXT");
 
@@ -413,7 +420,7 @@ namespace HnHMapperServer.Infrastructure.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.HasIndex("TenantId", "Name")
+                    b.HasIndex("TenantId", "Name", "Genus")
                         .IsUnique();
 
                     b.ToTable("Foods");

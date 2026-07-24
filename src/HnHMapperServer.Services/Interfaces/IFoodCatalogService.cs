@@ -11,9 +11,14 @@ public interface IFoodCatalogService
 {
     /// <summary>
     /// Returns the current tenant's food catalog (cached; invalidated on import/upload).
-    /// Empty when no tenant context is available.
+    /// Optionally filtered by genus. Empty when no tenant context is available.
     /// </summary>
-    Task<List<FoodDto>> GetCatalogAsync(CancellationToken ct = default);
+    Task<List<FoodDto>> GetCatalogAsync(string? genus = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the distinct genus values present in the current tenant's food catalog.
+    /// </summary>
+    Task<List<string>> GetGenusListAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Returns food/variant counts and last import/upload time for the given tenant.

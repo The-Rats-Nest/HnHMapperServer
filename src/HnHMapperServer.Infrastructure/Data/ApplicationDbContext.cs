@@ -945,11 +945,12 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Id
             entity.Property(e => e.CookingStation).IsRequired(false).HasMaxLength(300);
             entity.Property(e => e.Energy).IsRequired();
             entity.Property(e => e.Hunger).IsRequired();
+            entity.Property(e => e.Genus).IsRequired().HasMaxLength(100).HasDefaultValue(string.Empty);
             entity.Property(e => e.ImportedAt).IsRequired();
 
             entity.HasIndex(e => e.TenantId);
-            // One food name per tenant
-            entity.HasIndex(e => new { e.TenantId, e.Name }).IsUnique();
+            // One food name per tenant per genus
+            entity.HasIndex(e => new { e.TenantId, e.Name, e.Genus }).IsUnique();
 
             // Feps/Ingredients are owned collections stored as JSON columns;
             // Categories/SatiationGroups are primitive collections (JSON TEXT).
@@ -2218,6 +2219,9 @@ public sealed class FoodEntity
 
     /// <summary>Cooking station from the wiki ("Frying Pan and Fire"). NULL when unknown.</summary>
     public string? CookingStation { get; set; }
+
+    /// <summary>Game world identifier (genus), e.g. "xylem" or "lichen". Empty string for legacy/unknown.</summary>
+    public string Genus { get; set; } = string.Empty;
 
     /// <summary>UTC timestamp of the import batch that produced this row.</summary>
     public DateTime ImportedAt { get; set; }

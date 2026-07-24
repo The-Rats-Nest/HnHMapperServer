@@ -13,6 +13,9 @@ public class FoodDto
     /// <summary>Full game resource path, e.g. "gfx/invobjs/autumnsteak".</summary>
     public string ResourceName { get; set; } = string.Empty;
 
+    /// <summary>Game world identifier (genus). Empty string for legacy/unknown.</summary>
+    public string Genus { get; set; } = string.Empty;
+
     /// <summary>Energy restored when eaten (game percent points).</summary>
     public int Energy { get; set; }
 
@@ -250,7 +253,7 @@ public class FoodUploadRecordDto
     /// <summary>Sent by KamiClient only; currently stored as-recorded (not used for normalization).</summary>
     public decimal? Quality { get; set; }
 
-    /// <summary>Game world identifier some clients send; ignored.</summary>
+    /// <summary>Game world identifier (genus) sent by clients, used to separate foods by world.</summary>
     public string? Genus { get; set; }
 
     public List<FoodUploadIngredientDto>? Ingredients { get; set; }

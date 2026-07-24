@@ -23,6 +23,7 @@ public static class CookbookEndpoints
         catalog.MapGet("/foods", GetFoods);
         catalog.MapGet("/foods/{id:int}/variations", GetVariations);
         catalog.MapGet("/recipe-index", GetRecipeIndex);
+        catalog.MapGet("/genera", GetGenera);
 
         // Per-user food panels (Favorites + custom, optionally tenant-shared)
         catalog.MapGet("/panels", GetPanels);
@@ -50,12 +51,13 @@ public static class CookbookEndpoints
     /// Returns the full food catalog (cached server-side).
     /// </summary>
     private static async Task<IResult> GetFoods(
+        [FromQuery] string? genus,
         IFoodCatalogService foodCatalogService,
         ILogger<Program> logger)
     {
         try
         {
-            var foods = await foodCatalogService.GetCatalogAsync();
+            var foods = await foodCatalogService.GetCatalogAsync(genus);
             return Results.Ok(foods);
         }
         catch (Exception ex)
@@ -104,6 +106,26 @@ public static class CookbookEndpoints
         {
             logger.LogError(ex, "Error loading cookbook recipe index");
             return Results.Problem("Failed to load recipe index");
+        }
+    }
+
+    /// <summary>
+    /// GET /api/v1/cookbook/genera
+    /// Returns the distinct genus values available in the current tenant's catalog.
+    /// </summary>
+    private static async Task<IResult> GetGenera(
+        IFoodCatalogService foodCatalogService,
+        ILogger<Program> logger)
+    {
+        try
+        {
+            var genera = await foodCatalogService.GetGenusListAsync();
+            return Results.Ok(genera);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error loading cookbook genera");
+            return Results.Problem("Failed to load genera");
         }
     }
 
