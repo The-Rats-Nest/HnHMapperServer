@@ -692,6 +692,7 @@ See `deploy/SECURITY.md` for complete security checklist.
 - [ ] Rate limiting on login/registration endpoints
 
 ### Priority 2
+- [x] SSO / OpenID Connect (OIDC) support (authentik, Keycloak, Authelia, etc.)
 - [ ] Two-factor authentication (2FA)
 - [ ] Email notifications (invitations, quota warnings)
 - [ ] Performance metrics dashboard
