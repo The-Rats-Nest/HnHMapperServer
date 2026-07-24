@@ -1382,42 +1382,6 @@ app.MapGet("/api/sso/status", (IConfiguration config) =>
     return Results.Ok(new { enabled, displayName });
 }).AllowAnonymous();
 
-// GET /api/select-tenant/{tenantId} - Switch the current user's active tenant
-// This must be a server-side endpoint (not a Blazor component call) because
-// SignInAsync needs to write a Set-Cookie header on the HTTP response.
-app.MapGet("/api/select-tenant/{tenantId}", async (
-    string tenantId,
-    HttpContext context,
-    SignInManager<ApplicationUser> signInManager,
-    UserManager<ApplicationUser> userManager,
-    HnHMapperServer.Infrastructure.Data.ApplicationDbContext db,
-    ILogger<Program> logger) =>
-{
-    var user = await userManager.GetUserAsync(context.User);
-    if (user == null)
-        return Results.Redirect("/login");
-
-    // Verify the user actually belongs to this tenant
-    var tenantUser = await db.TenantUsers
-        .IgnoreQueryFilters()
-        .FirstOrDefaultAsync(tu => tu.UserId == user.Id && tu.TenantId == tenantId && tu.JoinedAt != default);
-
-    if (tenantUser == null)
-    {
-        logger.LogWarning("User {UserId} tried to switch to tenant {TenantId} but is not a member", user.Id, tenantId);
-        return Results.Redirect("/");
-    }
-
-    // Set the selected tenant so TenantClaimsPrincipalFactory picks it up
-    context.Items["SelectedTenantId"] = tenantId;
-
-    // Re-sign-in to regenerate the cookie with updated tenant claims
-    await signInManager.SignInAsync(user, isPersistent: true);
-    logger.LogInformation("User {UserId} switched to tenant {TenantId}", user.Id, tenantId);
-
-    return Results.Redirect("/");
-});
-
 // Support both GET and POST for logout (GET for navigation, POST for form submission)
 app.MapGet("/api/logout", async (HttpContext context) =>
 {

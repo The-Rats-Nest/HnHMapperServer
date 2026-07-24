@@ -1,6 +1,7 @@
 @using HnHMapperServer.Web.Models
 @using HnHMapperServer.Web.Services
 @inject TenantContextService TenantContext
+@inject ITenantService TenantService
 @inject NavigationManager Navigation
 @inject ISnackbar Snackbar
 
@@ -57,7 +58,7 @@
         }
     }
 
-    private void SelectTenant(TenantDto tenant)
+    private async Task SelectTenant(TenantDto tenant)
     {
         if (tenant.Id == TenantContext.CurrentTenant?.Id)
         {
@@ -65,11 +66,29 @@
             return;
         }
 
-        // Navigate to the server-side endpoint that re-signs-in with the new tenant.
-        // This MUST be a full server round-trip (forceLoad) because switching tenants
-        // requires writing a new authentication cookie via SignInAsync, which only
-        // works on a real HTTP response — not inside a Blazor SignalR circuit.
-        Navigation.NavigateTo($"/api/select-tenant/{tenant.Id}", forceLoad: true);
+        try
+        {
+            var success = await TenantService.SelectTenantAsync(tenant.Id);
+            if (success)
+            {
+                TenantContext.SetCurrentTenant(tenant);
+
+                // Navigate with forceLoad to refresh all components with new tenant context.
+                // Do NOT call Snackbar or any other Blazor UI operation before this,
+                // because forceLoad tears down the SignalR circuit immediately and any
+                // pending Blazor operations will fail with a WebSocket error.
+                Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+                return; // Ensure nothing else executes after navigation
+            }
+            else
+            {
+                Snackbar.Add("Failed to switch tenant", Severity.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Error switching tenant: {ex.Message}", Severity.Error);
+        }
     }
 
     private string GetTenantIcon(string tenantId)
