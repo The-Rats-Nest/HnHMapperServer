@@ -243,9 +243,6 @@ builder.Services.AddDataProtection()
     .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath))
     .SetApplicationName("HnHMapper");
 
-// Register IHttpContextAccessor for TenantClaimsPrincipalFactory
-builder.Services.AddHttpContextAccessor();
-
 // Add ASP.NET Core Identity with roles and EF stores
 builder.Services
     .AddIdentity<ApplicationUser, IdentityRole>(options =>

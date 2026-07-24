@@ -72,13 +72,10 @@
             if (success)
             {
                 TenantContext.SetCurrentTenant(tenant);
+                Snackbar.Add($"Switched to {tenant.Name}", Severity.Success);
 
-                // Navigate with forceLoad to refresh all components with new tenant context.
-                // Do NOT call Snackbar or any other Blazor UI operation before this,
-                // because forceLoad tears down the SignalR circuit immediately and any
-                // pending Blazor operations will fail with a WebSocket error.
+                // Reload the page to refresh all components with new tenant context
                 Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
-                return; // Ensure nothing else executes after navigation
             }
             else
             {
