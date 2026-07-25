@@ -1,3 +1,4 @@
+using HnHMapperServer.Core.DTOs;
 using HnHMapperServer.Web.Models;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -45,14 +46,31 @@ public class MapDataService
         return markers ?? new List<MarkerModel>();
     }
 
-    public async Task<Dictionary<string, MapInfoModel>> GetMapsAsync()
+    public async Task<List<GenusInfoDto>> GetMapGeneraAsync()
     {
         try
         {
             var client = _httpClientFactory.CreateClient("API");
-            _logger.LogDebug("Fetching maps from /map/api/maps");
+            return await client.GetFromJsonAsync<List<GenusInfoDto>>("/map/api/v1/genera") ?? new List<GenusInfoDto>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching map genera");
+            return new List<GenusInfoDto>();
+        }
+    }
+
+    public async Task<Dictionary<string, MapInfoModel>> GetMapsAsync(string? genus = null)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient("API");
+            var url = "/map/api/maps";
+            if (!string.IsNullOrEmpty(genus))
+                url += $"?genus={Uri.EscapeDataString(genus)}";
+            _logger.LogDebug("Fetching maps from {Url}", url);
             
-            var response = await client.GetFromJsonAsync<List<MapInfoModel>>("/map/api/maps");
+            var response = await client.GetFromJsonAsync<List<MapInfoModel>>(url);
 
             // Convert list to dictionary with ID as key
             var dict = new Dictionary<string, MapInfoModel>();

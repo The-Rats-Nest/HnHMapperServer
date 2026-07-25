@@ -81,7 +81,8 @@ public class GridService : IGridService
                 Name = mapName,  // Icon-based name like "arrow-wagon-4273"
                 Hidden = config.DefaultHide,
                 Priority = -1,  // New maps start with priority -1 so they appear below priority 0 maps
-                CreatedAt = DateTime.UtcNow  // Track creation time for auto-cleanup of empty maps
+                CreatedAt = DateTime.UtcNow,  // Track creation time for auto-cleanup of empty maps
+                Genus = gridUpdate.Genus  // Associate map with the game world genus
             };
 
             await _mapRepository.SaveMapAsync(mapInfo);
@@ -99,7 +100,8 @@ public class GridService : IGridService
                         Id = gridId,
                         Map = newMapId,
                         Coord = new Coord(x - 1, y - 1),
-                        NextUpdate = DateTime.UtcNow.AddMinutes(-1) // Set to past so grid is immediately requestable
+                        NextUpdate = DateTime.UtcNow.AddMinutes(-1), // Set to past so grid is immediately requestable
+                        Genus = gridUpdate.Genus
                     };
 
                     await _gridRepository.SaveGridAsync(gridData);
@@ -174,7 +176,8 @@ public class GridService : IGridService
                     Id = gridId,
                     Map = targetMapId,
                     Coord = new Coord(x + offset.X, y + offset.Y),
-                    NextUpdate = DateTime.UtcNow.AddMinutes(-1) // Set to past so grid is immediately requestable
+                    NextUpdate = DateTime.UtcNow.AddMinutes(-1), // Set to past so grid is immediately requestable
+                    Genus = gridUpdate.Genus
                 };
 
                 await _gridRepository.SaveGridAsync(gridData);

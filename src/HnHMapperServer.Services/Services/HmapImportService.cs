@@ -578,7 +578,7 @@ public class HmapImportService : IHmapImportService
                 const int MARKER_BATCH_SIZE = 500;
 
                 // Collect all valid markers across all segments
-                var markerBatch = new List<(string GridId, int X, int Y, string Name, string Image)>(MARKER_BATCH_SIZE);
+                var markerBatch = new List<(string GridId, int X, int Y, string Name, string Image, string Genus)>(MARKER_BATCH_SIZE);
                 var processedCount = 0;
 
                 foreach (var segmentId in segments)
@@ -619,7 +619,7 @@ public class HmapImportService : IHmapImportService
                             _ => "gfx/terobjs/mm/custom"
                         };
 
-                        markerBatch.Add((gridId, posX, posY, marker.Name, image));
+                        markerBatch.Add((gridId, posX, posY, marker.Name, image, string.Empty));
 
                         // Flush batch when full
                         if (markerBatch.Count >= MARKER_BATCH_SIZE)

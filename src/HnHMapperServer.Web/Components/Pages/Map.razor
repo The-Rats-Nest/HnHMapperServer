@@ -122,6 +122,26 @@
                     </MudChip>
                 }
 
+                @* World (Genus) Selector - floating top-right when multiple genera exist *@
+                @if (_mapGeneraInfo.Count > 1)
+                {
+                    <div style="position: fixed; top: 16px; right: 16px; z-index: 1400; min-width: 180px;">
+                        <MudSelect T="string"
+                                   Value="@_selectedMapGenus"
+                                   ValueChanged="@HandleMapGenusChanged"
+                                   Label="World"
+                                   Variant="Variant.Filled"
+                                   Margin="Margin.Dense"
+                                   Dense="true"
+                                   Style="background: var(--mud-palette-surface); border-radius: 4px;">
+                            @foreach (var g in _mapGeneraInfo)
+                            {
+                                <MudSelectItem T="string" Value="@g.Genus">@MapGenusDisplayName(g)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+                }
+
                 <!-- Overlay Toggle Buttons - Top Left (below Leaflet zoom controls) -->
                 <div style="position: fixed; top: 160px; left: 16px; z-index: 1400; display: flex; flex-direction: column; gap: 8px;">
                     <MudTooltip Text="Toggle Player Claims" Placement="Placement.Right">

@@ -149,7 +149,7 @@ public class MarkerService : IMarkerService
         }
     }
 
-    public async Task BulkUploadMarkersAsync(List<(string GridId, int X, int Y, string Name, string Image)> markers)
+    public async Task BulkUploadMarkersAsync(List<(string GridId, int X, int Y, string Name, string Image, string Genus)> markers)
     {
         if (markers.Count == 0)
             return;
@@ -157,7 +157,7 @@ public class MarkerService : IMarkerService
         // Build marker batch for efficient bulk insert
         var markerBatch = new List<(Marker marker, string key)>(markers.Count);
 
-        foreach (var (gridId, x, y, name, image) in markers)
+        foreach (var (gridId, x, y, name, image, genus) in markers)
         {
             var key = $"{gridId}_{x}_{y}";
             var img = string.IsNullOrEmpty(image) ? "gfx/terobjs/mm/custom" : image;

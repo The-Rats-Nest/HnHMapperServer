@@ -183,6 +183,10 @@ public partial class Map : IAsyncDisposable, IBrowserViewportObserver
     private TileInfoResult? tileInfoResult = null;
     private bool tileInfoLoading = false;
 
+    // Genus (world) filtering
+    private List<GenusInfoDto> _mapGeneraInfo = new();
+    private string? _selectedMapGenus;
+
     #endregion
 
     #region Computed Properties (Delegated to Services)
@@ -279,9 +283,14 @@ public partial class Map : IAsyncDisposable, IBrowserViewportObserver
                 return;
             }
 
+            // Load genera first so we can filter maps
+            _mapGeneraInfo = await MapData.GetMapGeneraAsync();
+            if (_mapGeneraInfo.Count > 0 && _selectedMapGenus == null)
+                _selectedMapGenus = _mapGeneraInfo[0].Genus;
+
             // Load initial data in parallel
             var markersTask = MapData.GetMarkersAsync();
-            var mapsTask = MapData.GetMapsAsync();
+            var mapsTask = MapData.GetMapsAsync(_selectedMapGenus);
 
             await Task.WhenAll(markersTask, mapsTask);
 
@@ -2277,6 +2286,35 @@ public partial class Map : IAsyncDisposable, IBrowserViewportObserver
         {
             await mapView.ToggleMarkerTooltipsAsync("quest", LayerVisibility.ShowQuestTooltips);
         }
+    }
+
+    private async Task HandleMapGenusChanged(string? genus)
+    {
+        _selectedMapGenus = genus;
+
+        // Reload maps filtered by genus
+        var mapsDict = await MapData.GetMapsAsync(_selectedMapGenus);
+        var mapsList = mapsDict.Values
+            .OrderByDescending(m => m.MapInfo.IsMainMap)
+            .ThenByDescending(m => m.MapInfo.Priority)
+            .ThenBy(m => m.MapInfo.Name)
+            .ToList();
+        MapNavigation.SetMaps(mapsList);
+
+        // Select first map in the new genus
+        var firstMap = MapNavigation.GetFirstVisibleMap();
+        if (firstMap != null)
+        {
+            await HandleMapSelected(firstMap);
+        }
+
+        StateHasChanged();
+    }
+
+    private string MapGenusDisplayName(GenusInfoDto g)
+    {
+        if (!string.IsNullOrEmpty(g.DisplayName)) return g.DisplayName;
+        return string.IsNullOrEmpty(g.Genus) ? "(unknown)" : g.Genus;
     }
 
     private void SetMode(SidebarMode mode)

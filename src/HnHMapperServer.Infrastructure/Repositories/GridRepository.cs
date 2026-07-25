@@ -16,7 +16,7 @@ public class GridRepository : IGridRepository
         _tenantContext = tenantContext;
     }
 
-    public async Task<GridData?> GetGridAsync(string gridId)
+    public async Task<GridData?> GetGridAsync(string gridId, string? genus = null)
     {
         // Explicit tenant filtering for defense-in-depth
         var currentTenantId = _tenantContext.GetCurrentTenantId();
@@ -29,7 +29,15 @@ public class GridRepository : IGridRepository
             query = query.Where(g => g.TenantId == currentTenantId);
         }
 
-        var entity = await query.FirstOrDefaultAsync(g => g.Id == gridId);
+        query = query.Where(g => g.Id == gridId);
+
+        // Filter by genus if specified
+        if (!string.IsNullOrEmpty(genus))
+        {
+            query = query.Where(g => g.Genus == genus);
+        }
+
+        var entity = await query.FirstOrDefaultAsync();
         return entity == null ? null : MapToDomain(entity);
     }
 
@@ -47,9 +55,9 @@ public class GridRepository : IGridRepository
                 // The PRIMARY KEY is (Id, TenantId), so each tenant can have their own copy
                 var currentTenantId = _tenantContext.GetRequiredTenantId();
 
-                // Check if grid exists for current tenant (uses global query filter automatically)
+                // Check if grid exists for current tenant and genus (uses global query filter automatically)
                 var existing = await _context.Grids
-                    .FirstOrDefaultAsync(g => g.Id == gridData.Id && g.TenantId == currentTenantId);
+                    .FirstOrDefaultAsync(g => g.Id == gridData.Id && g.TenantId == currentTenantId && g.Genus == gridData.Genus);
 
                 if (existing != null)
                 {
@@ -179,7 +187,8 @@ public class GridRepository : IGridRepository
         Id = entity.Id,
         Coord = new Coord(entity.CoordX, entity.CoordY),
         NextUpdate = entity.NextUpdate,
-        Map = entity.Map
+        Map = entity.Map,
+        Genus = entity.Genus
     };
 
     private GridDataEntity MapFromDomain(GridData grid) => new GridDataEntity
@@ -189,7 +198,8 @@ public class GridRepository : IGridRepository
         CoordY = grid.Coord.Y,
         NextUpdate = grid.NextUpdate,
         Map = grid.Map,
-        TenantId = _tenantContext.GetRequiredTenantId()
+        TenantId = _tenantContext.GetRequiredTenantId(),
+        Genus = grid.Genus
     };
 
     public async Task<HashSet<string>> GetExistingGridIdsAsync(IEnumerable<string> gridIds)
@@ -245,7 +255,8 @@ public class GridRepository : IGridRepository
             CoordY = g.Coord.Y,
             NextUpdate = g.NextUpdate,
             Map = g.Map,
-            TenantId = currentTenantId
+            TenantId = currentTenantId,
+            Genus = g.Genus
         }).ToList();
 
         _context.Grids.AddRange(entities);

@@ -6,6 +6,7 @@ namespace HnHMapperServer.Core.DTOs;
 public class GridUpdateDto
 {
     public List<List<string>> Grids { get; set; } = new();
+    public string Genus { get; set; } = string.Empty;
 }
 
 /// <summary>

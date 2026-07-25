@@ -22,7 +22,7 @@ public interface IMarkerService
     /// <summary>
     /// Bulk uploads markers
     /// </summary>
-    Task BulkUploadMarkersAsync(List<(string GridId, int X, int Y, string Name, string Image)> markers);
+    Task BulkUploadMarkersAsync(List<(string GridId, int X, int Y, string Name, string Image, string Genus)> markers);
 
     /// <summary>
     /// Deletes markers

@@ -27,4 +27,9 @@ public class MapInfo
     public int? DefaultStartY { get; set; }
 
     public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Game world genus (version) this map belongs to.
+    /// </summary>
+    public string Genus { get; set; } = string.Empty;
 }

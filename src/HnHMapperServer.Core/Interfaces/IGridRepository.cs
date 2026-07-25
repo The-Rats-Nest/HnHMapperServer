@@ -4,7 +4,7 @@ namespace HnHMapperServer.Core.Interfaces;
 
 public interface IGridRepository
 {
-    Task<GridData?> GetGridAsync(string gridId);
+    Task<GridData?> GetGridAsync(string gridId, string? genus = null);
     Task SaveGridAsync(GridData gridData);
     Task DeleteGridAsync(string gridId);
     Task<List<GridData>> GetAllGridsAsync();

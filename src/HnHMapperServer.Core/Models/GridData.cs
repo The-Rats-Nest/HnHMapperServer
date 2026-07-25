@@ -10,4 +10,9 @@ public class GridData
     public DateTime NextUpdate { get; set; }
     public int Map { get; set; }
     public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Game world genus (version) this grid belongs to.
+    /// </summary>
+    public string Genus { get; set; } = string.Empty;
 }

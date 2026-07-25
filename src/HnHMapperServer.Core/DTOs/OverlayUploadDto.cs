@@ -6,6 +6,7 @@ namespace HnHMapperServer.Core.DTOs;
 public class OverlayUploadDto
 {
     public string GridId { get; set; } = string.Empty;
+    public string Genus { get; set; } = string.Empty;
     public List<OverlayItemDto> Overlays { get; set; } = new();
 }
 

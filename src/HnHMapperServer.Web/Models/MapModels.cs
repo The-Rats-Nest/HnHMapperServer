@@ -71,6 +71,7 @@ public class MapMetadata
     public bool IsMainMap { get; set; }
     public int? DefaultStartX { get; set; }
     public int? DefaultStartY { get; set; }
+    public string Genus { get; set; } = string.Empty;
 }
 
 public class TileUpdate

@@ -34,6 +34,7 @@ public static class MapEndpoints
         group.MapGet("/v1/overlays", GetOverlays);
         group.MapGet("/config", GetConfig);
         group.MapGet("/maps", GetMaps);
+        group.MapGet("/v1/genera", GetMapGenera);
         group.MapGet("/v1/grids", GetGridIds);
         group.MapPost("/admin/wipeTile", WipeTile);
         group.MapPost("/admin/setCoords", SetCoords);
@@ -300,6 +301,7 @@ public static class MapEndpoints
 
     private static async Task<IResult> GetMaps(
         HttpContext context,
+        [FromQuery] string? genus,
         IMapRepository mapRepository,
         IConfigRepository configRepository,
         HnHMapperServer.Api.Services.MapRevisionCache revisionCache)
@@ -311,7 +313,13 @@ public static class MapEndpoints
 
         var config = await configRepository.GetConfigAsync();
         var maps = await mapRepository.GetAllMapsAsync();
-        var visibleMaps = maps.Where(m => !m.Hidden)
+        var filtered = maps.Where(m => !m.Hidden);
+
+        // Filter by genus if specified
+        if (!string.IsNullOrEmpty(genus))
+            filtered = filtered.Where(m => m.Genus == genus);
+
+        var visibleMaps = filtered
             .OrderByDescending(m => m.Priority)  // Higher priority first (e.g., 1, 0, -1)
             .ThenBy(m => m.Name)
             .Select(m => new
@@ -325,13 +333,47 @@ public static class MapEndpoints
                     Revision = revisionCache.Get(m.Id),  // Include current revision for initial cache setup
                     IsMainMap = config.MainMapId.HasValue && config.MainMapId.Value == m.Id,
                     DefaultStartX = m.DefaultStartX,
-                    DefaultStartY = m.DefaultStartY
+                    DefaultStartY = m.DefaultStartY,
+                    Genus = m.Genus
                 },
                 Size = 0  // Size not used in frontend, set to 0
             })
             .ToList();
 
         return Results.Json(visibleMaps);
+    }
+
+    /// <summary>
+    /// GET /map/api/v1/genera
+    /// Returns distinct genus values from all visible maps, with optional aliases.
+    /// </summary>
+    private static async Task<IResult> GetMapGenera(
+        HttpContext context,
+        IMapRepository mapRepository,
+        ApplicationDbContext db)
+    {
+        if (!context.User.Identity?.IsAuthenticated ?? true)
+            return Results.Unauthorized();
+
+        var maps = await mapRepository.GetAllMapsAsync();
+        var genera = maps.Where(m => !m.Hidden)
+            .Select(m => m.Genus)
+            .Distinct()
+            .OrderBy(g => g)
+            .ToList();
+
+        // Join with aliases
+        var aliases = await db.GenusAliases
+            .AsNoTracking()
+            .ToDictionaryAsync(a => a.Genus, a => a.DisplayName);
+
+        var result = genera.Select(g => new GenusInfoDto
+        {
+            Genus = g,
+            DisplayName = aliases.GetValueOrDefault(g)
+        }).ToList();
+
+        return Results.Json(result);
     }
 
     private static async Task<IResult> WipeTile(

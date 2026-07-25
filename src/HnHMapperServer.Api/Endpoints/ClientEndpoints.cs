@@ -400,6 +400,7 @@ public static partial class ClientEndpoints
 
         var form = await request.ReadFormAsync();
         var id = form["id"].ToString();
+        var genus = form["genus"].ToString();
         var extraData = form["extraData"].ToString();
 
         // Check for winter season skip logic
@@ -427,7 +428,7 @@ public static partial class ClientEndpoints
                     var seasonInt = Convert.ToInt32(season.ToString());
                     if (seasonInt == 3)
                     {
-                        var winterGrid = await gridRepository.GetGridAsync(id);
+                        var winterGrid = await gridRepository.GetGridAsync(id, genus);
                         if (winterGrid != null)
                         {
                             var tile = await tileService.GetTileAsync(winterGrid.Map, winterGrid.Coord, 0);
@@ -540,7 +541,7 @@ public static partial class ClientEndpoints
             }, statusCode: 400);
         }
 
-        var grid = await gridRepository.GetGridAsync(id);
+        var grid = await gridRepository.GetGridAsync(id, genus);
         if (grid == null)
         {
             // Grid doesn't exist for current tenant
@@ -698,7 +699,7 @@ public static partial class ClientEndpoints
         }
 
         // 3. Look up grid to get MapId and Coord
-        var grid = await gridRepository.GetGridAsync(request.GridId);
+        var grid = await gridRepository.GetGridAsync(request.GridId, request.Genus);
         if (grid == null)
         {
             logger.LogWarning("OverlayUpload: Unknown grid id {GridId}", request.GridId);
@@ -846,6 +847,7 @@ public static partial class ClientEndpoints
 
             // Safely get values from dictionary, handling missing keys (case-insensitive)
             var name = GetValue("Name")?.ToString() ?? "";
+            var genus = GetValue("Genus")?.ToString() ?? "";
             var gridId = GetValue("GridID")?.ToString() ?? "";
             var coordsObj = GetValue("Coords");
             var coords = coordsObj as JsonElement?;
@@ -891,14 +893,14 @@ public static partial class ClientEndpoints
                 continue;
             }
 
-            var grid = await gridRepository.GetGridAsync(gridId);
+            var grid = await gridRepository.GetGridAsync(gridId, genus);
             if (grid == null)
             {
                 skippedMissingGrid++;
                 unknownGrids.Add(gridId);
                 if (loggedMissingGrid < 5)
                 {
-                    logger.LogWarning("PositionUpdate: Skipping character ID={CharacterId} Name={Name} - unknown GridID={GridId}. Client must send gridUpdate first to register this grid.", id, name, gridId);
+                    logger.LogWarning("PositionUpdate: Skipping character ID={CharacterId} Name={Name} - unknown GridID={GridId} Genus={Genus}. Client must send gridUpdate first to register this grid.", id, name, gridId, genus);
                     loggedMissingGrid++;
                 }
                 continue;
@@ -976,7 +978,8 @@ public static partial class ClientEndpoints
             X: Convert.ToInt32(GetValue(m, "X")?.ToString() ?? "0"),
             Y: Convert.ToInt32(GetValue(m, "Y")?.ToString() ?? "0"),
             Name: GetValue(m, "Name")?.ToString() ?? "",
-            Image: GetValue(m, "Image")?.ToString() ?? ""
+            Image: GetValue(m, "Image")?.ToString() ?? "",
+            Genus: GetValue(m, "Genus")?.ToString() ?? ""
         )).ToList();
 
         await markerService.BulkUploadMarkersAsync(markerList);
@@ -984,7 +987,7 @@ public static partial class ClientEndpoints
         // Broadcast SSE events for each marker
         foreach (var m in markerList)
         {
-            var grid = await gridRepository.GetGridAsync(m.GridId);
+            var grid = await gridRepository.GetGridAsync(m.GridId, m.Genus);
             if (grid != null)
             {
                 updateNotificationService.NotifyMarkerCreated(new MarkerEventDto

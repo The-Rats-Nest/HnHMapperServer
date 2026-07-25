@@ -98,8 +98,8 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Id
 
         modelBuilder.Entity<GridDataEntity>(entity =>
         {
-            // COMPOSITE PRIMARY KEY: Allow same Grid ID across different tenants
-            entity.HasKey(e => new { e.Id, e.TenantId });
+            // COMPOSITE PRIMARY KEY: Allow same Grid ID across different tenants and genera
+            entity.HasKey(e => new { e.Id, e.TenantId, e.Genus });
 
             entity.Property(e => e.CoordX).IsRequired();
             entity.Property(e => e.CoordY).IsRequired();
@@ -292,11 +292,11 @@ public sealed class ApplicationDbContext : IdentityDbContext<ApplicationUser, Id
             entity.HasIndex(e => new { e.MapId, e.PlacedAt })
                 .HasAnnotation("Sqlite:IndexColumnOrder", new[] { "ASC", "DESC" });
 
-            // Composite foreign key to GridDataEntity (Id, TenantId)
-            // Since Grids now has composite PK, we need to reference both columns
+            // Composite foreign key to GridDataEntity (Id, TenantId, Genus)
+            // Since Grids has composite PK, we need to reference all columns
             entity.HasOne<GridDataEntity>()
                 .WithMany()
-                .HasForeignKey(e => new { e.GridId, e.TenantId })
+                .HasForeignKey(e => new { e.GridId, e.TenantId, e.Genus })
                 .OnDelete(DeleteBehavior.Cascade);
 
             // Foreign key to MapInfoEntity
@@ -1133,6 +1133,11 @@ public sealed class GridDataEntity
     public DateTime NextUpdate { get; set; }
     public int Map { get; set; }
     public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Game world genus (version) this grid belongs to.
+    /// </summary>
+    public string Genus { get; set; } = string.Empty;
 }
 
 public sealed class MarkerEntity
@@ -1149,6 +1154,11 @@ public sealed class MarkerEntity
     public long MinReady { get; set; }
     public bool Ready { get; set; }
     public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Game world genus (version) this marker belongs to.
+    /// </summary>
+    public string Genus { get; set; } = string.Empty;
 }
 
 public sealed class TileDataEntity
@@ -1189,6 +1199,11 @@ public sealed class MapInfoEntity
     public int? DefaultStartY { get; set; }
 
     public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Game world genus (version) this map belongs to.
+    /// </summary>
+    public string Genus { get; set; } = string.Empty;
 }
 
 public sealed class ConfigEntity
@@ -1306,6 +1321,11 @@ public sealed class CustomMarkerEntity
     /// Tenant ID for multi-tenancy isolation
     /// </summary>
     public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Game world genus (version) for composite FK to GridDataEntity.
+    /// </summary>
+    public string Genus { get; set; } = string.Empty;
 }
 
 /// <summary>
